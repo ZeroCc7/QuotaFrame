@@ -1,0 +1,10 @@
+<svg width="480" height="480" viewBox="0 0 480 480" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<clipPath id="ring"><circle cx="735" cy="470" r="350"/></clipPath>
+<clipPath id="badge"><rect x="1040" y="125" width="205" height="540"/></clipPath>
+<clipPath id="resets"><path d="M442 800H1152L1230 878V1118L1201 1146H446L418 1118V830Z"/></clipPath>
+</defs>
+<g transform="translate(-171.6 -63.2) scale(.56)"><image href="plate.png" width="1254" height="1254" clip-path="url(#ring)"/></g>
+<g transform="translate(176.3 39.5) scale(.244)"><image href="plate.png" width="1254" height="1254" clip-path="url(#badge)"/></g>
+<g transform="translate(-48.4 74) scale(.35)"><image href="plate.png" width="1254" height="1254" clip-path="url(#resets)"/></g>
+</svg>

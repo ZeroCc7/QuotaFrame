@@ -9,12 +9,16 @@ namespace usage_panel {
 
 enum class BatteryBand : uint8_t { Unavailable, One, Two, Three, Four };
 
-/** Preformatted clock strings used as part of the render key. */
+/** Clock strings and validated date fields used as part of the render key. */
 struct ClockView {
     bool available = false;
     char time[6] = "--:--";
     char weekday[4]{};
     char month_day[7]{};
+    uint16_t year = 0;
+    uint8_t month = 0;
+    uint8_t day = 0;
+    uint8_t weekday_index = 0;
 
     bool operator==(const ClockView& other) const;
 };

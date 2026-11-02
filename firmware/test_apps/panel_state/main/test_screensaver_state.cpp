@@ -346,3 +346,20 @@ TEST_CASE("disabled automatic clock still permits explicit toggle", "[screensave
     TEST_ASSERT_FALSE(select_clock_timeout(SettingsAction::Save, seconds));
     TEST_ASSERT_EQUAL_UINT32(1800, seconds);
 }
+
+TEST_CASE("legacy display defaults select EVA", "[settings]")
+{
+    const DisplaySettings defaults{50, 300};
+    TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(DisplayTheme::Eva),
+                           static_cast<uint8_t>(defaults.theme));
+}
+
+TEST_CASE("display theme identifiers are validated", "[settings]")
+{
+    TEST_ASSERT_TRUE(display_theme_valid(DisplayTheme::Eva));
+    TEST_ASSERT_TRUE(display_theme_valid(DisplayTheme::Guofeng));
+    TEST_ASSERT_FALSE(display_theme_valid(static_cast<DisplayTheme>(2)));
+    TEST_ASSERT_FALSE(display_theme_valid(static_cast<DisplayTheme>(255)));
+    DisplaySettings invalid{50, 300, static_cast<DisplayTheme>(255)};
+    TEST_ASSERT_EQUAL(ESP_ERR_INVALID_ARG, save_display_settings(invalid));
+}

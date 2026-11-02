@@ -2,10 +2,19 @@ idf_component_register(
     SRCS
         "app_main.cpp"
         "display_ui.cpp"
+        "hud/resources.c"
+        "hud/hud_digits.c"
+        "hud/hud_small.c"
+        "hud/guofeng/guofeng_digits.c"
+        "hud/clocks/eva_clock_font.c"
+        "hud/clocks/guofeng_clock_font.c"
+        "hud/clocks/guofeng_date_font.c"
         "memory_telemetry.cpp"
         "performance_probe.cpp"
         "orientation.cpp"
         "power_monitor.cpp"
+    EMBED_FILES "hud/background.rgb565" "hud/guofeng/guofeng.rgb565"
+        "hud/clocks/eva_clock.rgb565" "hud/clocks/guofeng_clock.rgb565"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash

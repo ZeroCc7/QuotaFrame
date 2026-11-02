@@ -38,7 +38,9 @@ bool ClockView::operator==(const ClockView& other) const
     return available == other.available &&
            std::strcmp(time, other.time) == 0 &&
            std::strcmp(weekday, other.weekday) == 0 &&
-           std::strcmp(month_day, other.month_day) == 0;
+           std::strcmp(month_day, other.month_day) == 0 &&
+           year == other.year && month == other.month && day == other.day &&
+           weekday_index == other.weekday_index;
 }
 
 bool BatteryView::operator==(const BatteryView& other) const
@@ -55,6 +57,10 @@ ClockView format_clock_view(const LocalCalendarTime* calendar)
     if (!calendar || !is_valid_calendar(*calendar)) return view;
 
     view.available = true;
+    view.year = calendar->year;
+    view.month = calendar->month;
+    view.day = calendar->day;
+    view.weekday_index = calendar->weekday;
     view.time[0] = static_cast<char>('0' + calendar->hour / 10);
     view.time[1] = static_cast<char>('0' + calendar->hour % 10);
     view.time[3] = static_cast<char>('0' + calendar->minute / 10);

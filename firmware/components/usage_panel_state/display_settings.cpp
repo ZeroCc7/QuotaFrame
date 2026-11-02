@@ -13,6 +13,10 @@ DisplaySettings load_display_settings(DisplaySettings defaults)
         brightness >= 1 && brightness <= 100) defaults.brightness = brightness;
     if (nvs_get_u32(handle, "clock_timeout", &timeout) == ESP_OK && timeout <= 86400)
         defaults.clock_timeout_seconds = timeout;
+    uint8_t theme = 0;
+    if (nvs_get_u8(handle, "theme", &theme) == ESP_OK &&
+        display_theme_valid(static_cast<DisplayTheme>(theme)))
+        defaults.theme = static_cast<DisplayTheme>(theme);
     nvs_close(handle);
     return defaults;
 }
@@ -20,13 +24,16 @@ DisplaySettings load_display_settings(DisplaySettings defaults)
 esp_err_t save_display_settings(const DisplaySettings& settings)
 {
     if (settings.brightness < 1 || settings.brightness > 100 ||
-        settings.clock_timeout_seconds > 86400) return ESP_ERR_INVALID_ARG;
+        settings.clock_timeout_seconds > 86400 || !display_theme_valid(settings.theme))
+        return ESP_ERR_INVALID_ARG;
     nvs_handle_t handle;
     esp_err_t error = nvs_open("display", NVS_READWRITE, &handle);
     if (error != ESP_OK) return error;
     error = nvs_set_u8(handle, "brightness", settings.brightness);
     if (error == ESP_OK)
         error = nvs_set_u32(handle, "clock_timeout", settings.clock_timeout_seconds);
+    if (error == ESP_OK)
+        error = nvs_set_u8(handle, "theme", static_cast<uint8_t>(settings.theme));
     if (error == ESP_OK) error = nvs_commit(handle);
     nvs_close(handle);
     return error;

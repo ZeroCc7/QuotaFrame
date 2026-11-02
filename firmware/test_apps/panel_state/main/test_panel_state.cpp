@@ -41,6 +41,13 @@ TEST_CASE("clock view formats approved ASCII time and date", "[panel_state]")
     TEST_ASSERT_EQUAL_STRING("14:32", view.time);
     TEST_ASSERT_EQUAL_STRING("WED", view.weekday);
     TEST_ASSERT_EQUAL_STRING("AUG 12", view.month_day);
+    TEST_ASSERT_EQUAL_UINT16(2026, view.year);
+    TEST_ASSERT_EQUAL_UINT8(8, view.month);
+    TEST_ASSERT_EQUAL_UINT8(12, view.day);
+    TEST_ASSERT_EQUAL_UINT8(3, view.weekday_index);
+    ClockView changed_year = view;
+    changed_year.year = 2027;
+    TEST_ASSERT_FALSE(view == changed_year);
     const ClockView unavailable = format_clock_view(nullptr);
     TEST_ASSERT_FALSE(unavailable.available);
     TEST_ASSERT_EQUAL_STRING("--:--", unavailable.time);

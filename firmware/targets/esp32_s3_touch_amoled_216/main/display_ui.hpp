@@ -29,14 +29,14 @@ public:
     /** Initializes display/touch/LVGL and builds the complete object tree. */
     bool begin(ScreenRotation initial_rotation);
 
-    void request_page(Page page) { requested_page_.store(page, std::memory_order_relaxed); }
+    void request_page(Page) { requested_page_.store(Page::Codex, std::memory_order_relaxed); }
     bool apply_settings(const DisplaySettings& settings, bool visible, bool save_error = false, bool modified = false);
     SettingsAction take_settings_action()
     {
         return settings_action_.exchange(SettingsAction::None, std::memory_order_relaxed);
     }
 
-    /** Returns the latest page requested by tabs or gestures. */
+    /** Returns the single Codex usage page. */
     Page requested_page() const
     {
         return requested_page_.load(std::memory_order_relaxed);
@@ -83,20 +83,39 @@ public:
     struct MetricWidgets {
         lv_obj_t* value = nullptr;
         lv_obj_t* reset = nullptr;
-        lv_obj_t* bar = nullptr;
+        lv_obj_t* unit = nullptr;
+        lv_obj_t* caption = nullptr;
+        bool primary = false;
+        bool guofeng = false;
+        lv_obj_t* ring = nullptr;
+        lv_obj_t* segments[28]{};
+        bool available = false;
+        bool fresh = false;
+        int32_t target = -1;
+        int32_t displayed = 0;  // Tenths of one percent.
+        int32_t animation_from = 0;
+        uint32_t animation_started = 0;
+        uint32_t animation_duration = 600;
+        int32_t painted_value = -2;
+        int painted_breath = -1;
+        bool painted_fresh = false;
+        lv_obj_t* rollers = nullptr;
+        lv_obj_t* decimal = nullptr;
+        lv_obj_t* prefix = nullptr;
+        lv_obj_t* suffix = nullptr;
+        lv_obj_t* digit_clips[4]{};
+        lv_obj_t* digit_labels[4][2]{};
+        int reel_digits[4]{-1, -1, -1, -1};
+        int digit_height = 0;
+        int digit_width = 0;
+        int32_t painted_progress = -1;
     };
 
     struct ProviderWidgets {
-        bool compact = false;
         lv_obj_t* panel = nullptr;
         lv_obj_t* status = nullptr;
         MetricWidgets short_window;
         MetricWidgets week_window;
-    };
-
-    struct TabBinding {
-        DisplayUi* ui = nullptr;
-        uint8_t tab_index = 0;
     };
 
 private:
@@ -112,25 +131,27 @@ private:
     static void settings_event(lv_event_t* event);
     static void long_press_event(lv_event_t* event);
     void build_header(lv_obj_t* screen);
-    void build_overview(lv_obj_t* screen);
-    void build_provider_page(lv_obj_t* screen, Provider provider);
-    void build_navigation(lv_obj_t* screen);
+    void build_provider_page(lv_obj_t* screen);
+    void build_guofeng_page(lv_obj_t* screen);
     void build_screensaver(lv_obj_t* screen);
+    void apply_clock_theme();
     void build_pairing_overlay(lv_obj_t* screen);
     void build_ota_overlay(lv_obj_t* screen);
-    void show_page(Page page, bool animate);
     void update_provider(ProviderWidgets& widgets, const UsageModel& model,
                          Provider provider, bool connected, uint64_t now_ms);
     void update_metric(MetricWidgets& widgets, const UsageWindow& window,
                        bool has_data, uint32_t epoch, bool fresh);
     void update_screensaver_usage(const ScreensaverUsageView& usage);
+    static void animate_hud(lv_timer_t* timer);
+    static void paint_metric(MetricWidgets& widgets, uint32_t tick);
+    static void build_metric_rollers(MetricWidgets& widgets);
+    static void paint_metric_rollers(MetricWidgets& widgets, int32_t progress, uint32_t color);
+    void set_hud_motion(bool visible, bool replay);
 
     bool set_transition_brightness(int32_t percent);
     static void transition_brightness(void* target, int32_t percent);
     static void transition_refresh_ready(lv_event_t* event);
 
-    static void tab_event(lv_event_t* event);
-    static void gesture_event(lv_event_t* event);
     static void touch_down_event(lv_event_t* event);
     static void ota_confirm_event(lv_event_t* event);
     static void ota_deny_event(lv_event_t* event);
@@ -140,16 +161,16 @@ private:
 #endif
 
     struct SettingsBinding { DisplayUi* ui; SettingsAction action; };
-    SettingsBinding settings_bindings_[9]{};
+    SettingsBinding settings_bindings_[11]{};
     std::atomic<SettingsAction> settings_action_{SettingsAction::None};
     std::atomic<bool> settings_visible_{false};
     lv_obj_t* settings_panel_ = nullptr;
     lv_obj_t* settings_brightness_ = nullptr;
-    lv_obj_t* settings_buttons_[9]{};
+    lv_obj_t* settings_buttons_[11]{};
     lv_obj_t* settings_timeout_ = nullptr;
     lv_obj_t* settings_hint_ = nullptr;
     uint8_t brightness_percent_ = 50;  // Serialized by the LVGL lock.
-    std::atomic<Page> requested_page_{Page::Overview};
+    std::atomic<Page> requested_page_{Page::Codex};
     std::atomic<bool> ota_active_{false};
     std::atomic<bool> ota_confirming_{false};
     std::atomic<bool> ota_confirmation_requested_{false};
@@ -169,22 +190,23 @@ private:
     lv_obj_t* battery_group_ = nullptr;
     lv_obj_t* charge_symbol_ = nullptr;
     lv_obj_t* battery_segments_[4]{};
-    lv_obj_t* overview_panel_ = nullptr;
-    ProviderWidgets overview_[2]{};
-    ProviderWidgets provider_pages_[2]{};
-    lv_obj_t* nav_labels_[3]{};
-    // One underline shared by the three tabs, slid between them by a translate
-    // transform. It is built parked under Page::Overview, so shown_page_ starts
-    // there and that page's translation is zero.
-    lv_obj_t* nav_indicator_ = nullptr;
-    Page shown_page_ = Page::Overview;
+    ProviderWidgets codex_page_{};
+    ProviderWidgets guofeng_page_{};
+    DisplayTheme theme_ = DisplayTheme::Eva;
+    lv_timer_t* hud_timer_ = nullptr;
     lv_obj_t* screensaver_panel_ = nullptr;
     lv_obj_t* screensaver_content_ = nullptr;
+    lv_obj_t* screensaver_background_ = nullptr;
+    lv_obj_t* screensaver_seal_ = nullptr;
+    lv_obj_t* screensaver_date_row_ = nullptr;
+    lv_obj_t* screensaver_date_dot_ = nullptr;
+    DisplayTheme clock_theme_ = DisplayTheme::Eva;
+    bool clock_theme_applied_ = false;
     lv_obj_t* screensaver_time_ = nullptr;
     lv_obj_t* screensaver_weekday_ = nullptr;
     lv_obj_t* screensaver_month_day_ = nullptr;
     lv_obj_t* screensaver_hint_ = nullptr;
-    ScreensaverUsageWidgets screensaver_usage_[2]{};
+    ScreensaverUsageWidgets screensaver_usage_[1]{};
     lv_obj_t* screensaver_low_group_ = nullptr;
     lv_obj_t* screensaver_low_segments_[4]{};
     lv_obj_t* pairing_panel_ = nullptr;
@@ -208,7 +230,6 @@ private:
     int64_t probe_refresh_started_us_ = 0;
     bool probe_refresh_active_ = false;
 #endif
-    TabBinding tab_bindings_[3]{};
 };
 
 }  // namespace usage_panel::amoled

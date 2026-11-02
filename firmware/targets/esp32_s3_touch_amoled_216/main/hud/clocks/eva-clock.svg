@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="480" height="480" viewBox="0 0 480 480">
+<g fill="none" stroke="#79342c" stroke-width="1">
+<path d="M24 128V92L52 64H166M314 64H428L456 92V128M24 322V388L50 414H162M318 414H430L456 388V322"/>
+<path d="M46 153H428L452 177V263L428 287H28V171Z" stroke="#e35a45" stroke-width="2"/>
+<path d="M42 161H422L444 183M36 276H420L440 256M92 312H378L388 322V340L378 350H102L92 340Z"/>
+<path d="M12 178H22M12 190H22M12 202H22M12 214H22M12 226H22M12 238H22M458 178H468M458 190H468M458 202H468M458 214H468M458 226H468M458 238H468"/>
+</g>
+<g fill="#c95b45" font-family="Oxanium" font-weight="800">
+<text x="32" y="101" font-size="21" letter-spacing="3">LOCAL TIME</text>
+<text x="32" y="123" font-size="11" letter-spacing="2">CHRONO / 24H</text>
+<text x="354" y="123" font-size="12">UNIT-02</text>
+<text x="240" y="385" text-anchor="middle" font-size="11" letter-spacing="3" fill="#72473b">CODEX / USAGE</text>
+<path d="M326 71h14l-14 16h-14ZM346 71h14l-14 16h-14ZM366 71h14l-14 16h-14ZM386 71h14l-14 16h-14Z"/>
+</g></svg>

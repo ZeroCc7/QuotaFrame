@@ -89,7 +89,7 @@ AtomicPowerSource ota_power_source;
 BleService ble;
 DisplayUi ui;
 LinkUpdate ble_link{};
-std::atomic<Page> status_page{Page::Overview};
+std::atomic<Page> status_page{Page::Codex};
 
 const char* get_ui_location(void* context)
 {
@@ -106,7 +106,7 @@ const BleServiceConfig ble_config{
     .get_ui_location = get_ui_location,
     .ui_context = &status_page,
     .enable_screen_toggle = true,
-    .enable_screen_page = true,
+    .enable_screen_page = false,
 };
 
 bool init_orientation_sensor(qmi8658_dev_t& sensor)
@@ -225,7 +225,7 @@ extern "C" void app_main(void)
 
     ESP_LOGI(TAG, "Waveshare usage panel started");
 
-    Page page = Page::Overview;
+    Page page = Page::Codex;
     bool dirty = true;
     bool has_last_render_key = false;
     TimedRenderKey last_render_key{};
@@ -305,6 +305,10 @@ extern "C" void app_main(void)
                     settings.brightness = settings.brightness <= 10 ? 1 : settings.brightness - 10;
                 else if (action == SettingsAction::Brighter)
                     settings.brightness = settings.brightness >= 90 ? 100 : settings.brightness + 10;
+                else if (action == SettingsAction::ThemeEva)
+                    settings.theme = DisplayTheme::Eva;
+                else if (action == SettingsAction::ThemeGuofeng)
+                    settings.theme = DisplayTheme::Guofeng;
                 else if (action >= SettingsAction::TimeoutOff && action <= SettingsAction::Timeout30)
                     select_clock_timeout(action, settings.clock_timeout_seconds);
                 else if (action == SettingsAction::Save) {
@@ -319,7 +323,8 @@ extern "C" void app_main(void)
             }
             if (!ui.apply_settings(settings, settings_open, save_error,
                     settings.brightness != saved_settings.brightness ||
-                    settings.clock_timeout_seconds != saved_settings.clock_timeout_seconds)) {
+                    settings.clock_timeout_seconds != saved_settings.clock_timeout_seconds ||
+                    settings.theme != saved_settings.theme)) {
                 settings = before;
                 settings_open = was_open;
                 ESP_LOGW(TAG, "display settings preview failed");
@@ -344,8 +349,7 @@ extern "C" void app_main(void)
             } else if (event.type == AppEventType::ScreenPage) {
                 if (ota_view.phase == OtaPhase::Idle && !ble_link.has_passkey) {
                     if (screensaver.view(now_ms).active) page = screensaver.restore_page();
-                    page = page_after_swipe(page, event.previous_page
-                        ? SwipeDirection::Previous : SwipeDirection::Next);
+                    page = Page::Codex;
                     ui.request_page(page);
                     screensaver.reset(now_ms, page);
                     settings = saved_settings;

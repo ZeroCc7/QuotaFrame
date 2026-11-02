@@ -1,12 +1,13 @@
 #include "display_ui.hpp"
 
 #include <cstdio>
-#include <initializer_list>
+#include <ctime>
 
 #include "bsp/esp-bsp.h"
 #include "bsp/display.h"
 #include "bsp/touch.h"
 #include "display_transport.hpp"
+#include "hud/rolling_digits.hpp"
 #include "performance_probe.hpp"
 #include "usage_fonts/usage_fonts.h"
 #include "esp_heap_caps.h"
@@ -14,14 +15,26 @@
 #include "esp_lv_adapter.h"
 #include "esp_timer.h"
 #include "sdkconfig.h"
-#include "usage_panel_state/usage_bar_animation.hpp"
 #include "usage_ota/presentation.hpp"
+
+extern "C" {
+LV_FONT_DECLARE(hud_digits);
+LV_FONT_DECLARE(hud_small);
+LV_FONT_DECLARE(guofeng_digits);
+LV_FONT_DECLARE(eva_clock_font);
+LV_FONT_DECLARE(guofeng_clock_font);
+LV_FONT_DECLARE(guofeng_date_font);
+LV_IMAGE_DECLARE(eva_hud_background);
+LV_IMAGE_DECLARE(guofeng_background);
+LV_IMAGE_DECLARE(eva_clock_background);
+LV_IMAGE_DECLARE(guofeng_clock_background);
+}
 
 namespace usage_panel::amoled {
 namespace {
 constexpr char TAG[] = "amoled_ui";
 constexpr uint32_t COLOR_BG     = 0x0A0C10;
-// True black keeps background pixels unlit during prolonged screensaver use.
+// Black backing keeps uncovered pixels unlit during clock mode.
 constexpr uint32_t COLOR_SAVER_BG = 0x000000;
 constexpr uint32_t COLOR_PANEL  = 0x171B22;
 constexpr uint32_t COLOR_BORDER = 0x272C35;
@@ -37,7 +50,7 @@ constexpr uint32_t COLOR_BAD    = 0xF26D6D;
 constexpr uint32_t COLOR_BATTERY_OFF = 0x2C313B;
 constexpr uint32_t COLOR_LOW_DIM = 0x8A6A2E;
 // Screensaver usage underline colours. A thin underline needs more contrast
-// than the 120 px digits to stay legible at viewing distance, so the base fill
+// than the clock digits to stay legible at viewing distance, so the base fill
 // matches COLOR_DIM (the dimmest reliably legible element) while the track is
 // dimmer still to keep a visible reference length.
 constexpr uint32_t COLOR_SAVER_TRACK = 0x2C313B;
@@ -47,34 +60,15 @@ constexpr uint32_t COLOR_SAVER_BAD   = COLOR_MUTED;
 constexpr int MARGIN      = 24;
 constexpr int CARD_W      = 432;
 constexpr int CARD_PAD    = 20;
-constexpr int OVERVIEW_PAD = 18;
 constexpr int CARD_RADIUS = 16;
 constexpr int HEADER_H    = 50;
-constexpr int BAR_H_OVERVIEW = 12;
 constexpr int BAR_H_DETAIL   = 16;
-constexpr int NAV_H       = 34;
-constexpr int NAV_Y       = 436;
-constexpr int NAV_GAP     = 6;
-constexpr int NAV_BAR_W   = 26;
-constexpr int NAV_BAR_H   = 2;
-constexpr int NAV_LABEL_GAP = 7;
-// The three tabs share the row with flex-grow 1, so their width is exact only
-// while the remaining space divides evenly. The shared underline is placed from
-// these numbers rather than from resolved geometry, which keeps it independent
-// of when the flex pass runs; the assert is what makes that safe.
-static_assert((CARD_W - 2 * NAV_GAP) % 3 == 0,
-              "navigation tabs must divide the row evenly");
-constexpr int NAV_TAB_W   = (CARD_W - 2 * NAV_GAP) / 3;
-constexpr int NAV_TAB_PITCH = NAV_TAB_W + NAV_GAP;
-constexpr int NAV_BAR_X   = (NAV_TAB_W - NAV_BAR_W) / 2;
 constexpr int PAIRING_BOTTOM = 52;
 constexpr int SCREEN_W    = 480;
 constexpr int SCREEN_H    = 480;
 constexpr int BATTERY_GROUP_W = 44;
 constexpr int BATTERY_BODY_W = 30;
 constexpr int BATTERY_BODY_H = 14;
-constexpr int CONTENT_Y   = HEADER_H + 1;
-constexpr int CONTENT_H   = NAV_Y - CONTENT_Y;
 constexpr int OTA_CARD_Y         = 98;
 constexpr int OTA_CARD_H         = 212;
 constexpr int OTA_CARD_ROW_Y     = CARD_PAD;
@@ -88,15 +82,15 @@ constexpr int OTA_WAIT_TITLE_Y   = 210;
 constexpr int OTA_WAIT_DETAIL_Y  = 258;
 constexpr int OTA_FAIL_ROW_Y     = 200;
 constexpr int OTA_FAIL_DETAIL_Y  = 254;
-constexpr int SAVER_CLOCK_Y      = 133;
-constexpr int SAVER_CLOCK_H      = 88;   // montserrat_bold_120 line height
-constexpr int SAVER_DATE_Y       = 271;
+constexpr int SAVER_CLOCK_Y      = 182;
+constexpr int SAVER_CLOCK_H      = 69;   // eva_clock_font line height.
+constexpr int SAVER_DATE_Y       = 317;
 constexpr int SAVER_DATE_H       = 28;
-constexpr int SAVER_USAGE_Y      = 320;
+constexpr int SAVER_USAGE_Y      = 354;
 constexpr int SAVER_ROW_H        = 16;
 constexpr int SAVER_ROW_GAP      = 2;
 constexpr int SAVER_BAR_W        = 220;
-// A hairline underline loses to the 120 px clock at viewing distance no matter
+// A hairline underline loses to the clock at viewing distance no matter
 // how its colour is tuned.
 constexpr int SAVER_BAR_H        = 3;
 constexpr int SAVER_PCT_GAP      = 12;
@@ -122,13 +116,6 @@ static_assert(
     SCREEN_W);
 static_assert(SAVER_PCT_X + SAVER_PCT_W <= SAVER_USAGE_W);
 static_assert(SAVER_PCT_Y + 12 <= SAVER_ROW_H);  // 12 px is the font's line height.
-// Ink runs from the top of the clock to the middle of the lower bar. Equal
-// margins top and bottom mean the block is centred; the wake hint is excluded
-// because it fades out and is not part of the resting composition.
-constexpr int SAVER_INK_TOP    = SAVER_CLOCK_Y;
-constexpr int SAVER_INK_BOTTOM =
-    SAVER_USAGE_Y + SAVER_ROW_H + SAVER_ROW_GAP + (SAVER_ROW_H + SAVER_BAR_H) / 2;
-static_assert(SAVER_INK_TOP + SAVER_INK_BOTTOM == SCREEN_H);
 static_assert(SAVER_CLOCK_Y + SAVER_CLOCK_H < SAVER_DATE_Y);
 static_assert(SAVER_DATE_Y + SAVER_DATE_H <= SAVER_USAGE_Y);
 
@@ -318,27 +305,39 @@ esp_err_t apply_touch_mapping(
            mirror_x_error != ESP_OK ? mirror_x_error : mirror_y_error;
 }
 
-size_t provider_index(Provider provider)
+constexpr uint32_t quota_color_hex(unsigned remaining)
 {
-    return provider == Provider::Codex ? 0 : 1;
+    uint32_t low = 0xFF424C;
+    uint32_t high = 0xFF674F;
+    unsigned position = remaining;
+    unsigned span = 20;
+    if (remaining > 60) {
+        low = 0xFF965F;
+        high = 0xFFBC83;
+        position = remaining - 60;
+        span = 40;
+    } else if (remaining > 20) {
+        low = 0xFF674F;
+        high = 0xFF965F;
+        position = remaining - 20;
+        span = 40;
+    }
+    uint32_t color = 0xFF0000;
+    for (unsigned shift = 0; shift <= 8; shift += 8) {
+        const unsigned start = (low >> shift) & 0xFF;
+        const unsigned end = (high >> shift) & 0xFF;
+        color |= ((start * (span - position) + end * position + span / 2) / span) << shift;
+    }
+    return color;
 }
 
-constexpr uint32_t usage_color_hex(uint8_t percent)
-{
-    return percent >= 95 ? COLOR_BAD : percent >= 80 ? COLOR_WARN : COLOR_TEXT;
-}
-
-static_assert(usage_color_hex(0) == COLOR_TEXT);
-static_assert(usage_color_hex(79) == COLOR_TEXT);
-static_assert(usage_color_hex(80) == COLOR_WARN);
-static_assert(usage_color_hex(94) == COLOR_WARN);
-static_assert(usage_color_hex(95) == COLOR_BAD);
-static_assert(usage_color_hex(100) == COLOR_BAD);
-
-lv_color_t usage_color(uint8_t percent)
-{
-    return lv_color_hex(usage_color_hex(percent));
-}
+static_assert(quota_color_hex(100) == 0xFFBC83);
+static_assert(quota_color_hex(80) == 0xFFA971);
+static_assert(quota_color_hex(60) == 0xFF965F);
+static_assert(quota_color_hex(40) == 0xFF7F57);
+static_assert(quota_color_hex(20) == 0xFF674F);
+static_assert(quota_color_hex(10) == 0xFF554E);
+static_assert(quota_color_hex(0) == 0xFF424C);
 
 constexpr uint32_t saver_usage_color_hex(ScreensaverUsageLevel level)
 {
@@ -406,58 +405,6 @@ void style_bar(lv_obj_t* bar, int height)
     lv_obj_set_style_radius(bar, height / 2, LV_PART_INDICATOR);
 }
 
-/** Animation callback for the shared navigation underline. */
-void nav_indicator_slide(void* target, int32_t translate_x)
-{
-    lv_obj_set_style_translate_x(
-        static_cast<lv_obj_t*>(target), translate_x, 0);
-}
-
-void build_compact_metric(lv_obj_t* parent, const char* name,
-                           int label_y, int value_y, int bar_y,
-                           DisplayUi::MetricWidgets& widgets)
-{
-    lv_obj_t* label = make_label(
-        parent, name, OVERVIEW_PAD, label_y,
-        &lv_font_montserrat_14, COLOR_MUTED);
-    lv_obj_set_style_text_letter_space(label, 1, 0);
-    widgets.value =
-        make_label(parent, "--", OVERVIEW_PAD, value_y,
-                   &lv_font_montserrat_30);
-    lv_obj_set_width(widgets.value, CARD_W - 2 * OVERVIEW_PAD);
-    lv_obj_set_style_text_align(widgets.value, LV_TEXT_ALIGN_RIGHT, 0);
-    widgets.bar = lv_bar_create(parent);
-    lv_obj_set_pos(widgets.bar, OVERVIEW_PAD, bar_y);
-    lv_obj_set_size(
-        widgets.bar, CARD_W - 2 * OVERVIEW_PAD, BAR_H_OVERVIEW);
-    style_bar(widgets.bar, BAR_H_OVERVIEW);
-    lv_bar_set_value(widgets.bar, 0, LV_ANIM_OFF);
-}
-
-void build_large_metric(lv_obj_t* parent, const char* name, int y,
-                        DisplayUi::MetricWidgets& widgets)
-{
-    lv_obj_t* card = lv_obj_create(parent);
-    lv_obj_set_pos(card, MARGIN, y);
-    lv_obj_set_size(card, CARD_W, 158);
-    style_panel(card);
-    lv_obj_t* label = make_label(
-        card, name, CARD_PAD, 16, &lv_font_montserrat_16, COLOR_MUTED);
-    lv_obj_set_style_text_letter_space(label, 1, 0);
-    widgets.reset =
-        make_label(card, "", 220, 16, &lv_font_montserrat_16, COLOR_RESET);
-    lv_obj_set_width(widgets.reset, CARD_W - 220 - CARD_PAD);
-    lv_obj_set_style_text_align(widgets.reset, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_letter_space(widgets.reset, 1, 0);
-    widgets.value =
-        make_label(card, "--", CARD_PAD, 43, &lv_font_montserrat_48);
-    widgets.bar = lv_bar_create(card);
-    lv_obj_set_pos(widgets.bar, CARD_PAD, 124);
-    lv_obj_set_size(
-        widgets.bar, CARD_W - 2 * CARD_PAD, BAR_H_DETAIL);
-    style_bar(widgets.bar, BAR_H_DETAIL);
-    lv_bar_set_value(widgets.bar, 0, LV_ANIM_OFF);
-}
 }  // namespace
 
 bool DisplayUi::begin(ScreenRotation initial_rotation)
@@ -483,23 +430,19 @@ bool DisplayUi::begin(ScreenRotation initial_rotation)
     lv_obj_remove_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(screen, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(screen, touch_down_event, LV_EVENT_PRESSED, this);
-    // Listen at the input-device level as well: a press targeting a card,
-    // label, or navigation button is not guaranteed to bubble to the screen.
+    // Child widgets do not always bubble presses to the screen.
     lv_indev_add_event_cb(
         input_device_, touch_down_event, LV_EVENT_PRESSED, this);
 
     lv_indev_set_long_press_time(input_device_, 800);
     lv_indev_add_event_cb(input_device_, long_press_event, LV_EVENT_LONG_PRESSED, this);
     build_header(screen);
-    build_overview(screen);
-    build_provider_page(screen, Provider::Codex);
-    build_provider_page(screen, Provider::Claude);
-    build_navigation(screen);
+    build_provider_page(screen);
+    build_guofeng_page(screen);
     build_screensaver(screen);
     build_settings(screen);
     build_pairing_overlay(screen);
     build_ota_overlay(screen);
-    show_page(Page::Overview, /*animate=*/false);
     lv_display_add_event_cb(
         display_, transition_refresh_ready, LV_EVENT_REFR_READY, this);
 
@@ -617,16 +560,10 @@ void DisplayUi::start_next_probe_refresh()
 {
     if (probe_refresh_sample_ >= 90) {
         probe_refresh_active_ = false;
-        show_page(Page::Overview, /*animate=*/false);
-        lv_obj_invalidate(lv_screen_active());
+            lv_obj_invalidate(lv_screen_active());
         return;
     }
 
-    constexpr Page pages[] = {Page::Overview, Page::Codex, Page::Claude};
-    const uint32_t page_index = probe_refresh_sample_ % 3;
-    // The probe times forced full repaints; an underline animation would add
-    // invalid areas to the very refreshes it is measuring.
-    show_page(pages[page_index], /*animate=*/false);
     probe_refresh_started_us_ = esp_timer_get_time();
     lv_obj_invalidate(lv_screen_active());
 }
@@ -758,13 +695,25 @@ void DisplayUi::build_screensaver(lv_obj_t* screen)
     lv_obj_set_style_pad_all(screensaver_content_, 0, 0);
     lv_obj_remove_flag(screensaver_content_, LV_OBJ_FLAG_SCROLLABLE);
 
+    screensaver_background_ = lv_image_create(screensaver_content_);
+    lv_obj_remove_flag(screensaver_background_, LV_OBJ_FLAG_CLICKABLE);
+
+    screensaver_seal_ = lv_obj_create(screensaver_content_);
+    lv_obj_remove_style_all(screensaver_seal_);
+    lv_obj_set_pos(screensaver_seal_, 234, 108);
+    lv_obj_set_size(screensaver_seal_, 12, 12);
+    lv_obj_set_style_bg_color(screensaver_seal_, lv_color_hex(0xA95443), 0);
+    lv_obj_set_style_bg_opa(screensaver_seal_, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(screensaver_seal_, LV_OBJ_FLAG_CLICKABLE);
+
     screensaver_time_ = make_label(
         screensaver_content_, "--:--", 0, SAVER_CLOCK_Y,
-        &montserrat_bold_120, COLOR_MUTED);
+        &eva_clock_font, COLOR_MUTED);
     lv_obj_set_width(screensaver_time_, SCREEN_W);
     lv_obj_set_style_text_align(screensaver_time_, LV_TEXT_ALIGN_CENTER, 0);
 
     lv_obj_t* date_row = lv_obj_create(screensaver_content_);
+    screensaver_date_row_ = date_row;
     lv_obj_set_pos(date_row, 0, SAVER_DATE_Y);
     lv_obj_set_size(date_row, SCREEN_W, SAVER_DATE_H);
     lv_obj_set_style_bg_opa(date_row, LV_OPA_TRANSP, 0);
@@ -780,6 +729,7 @@ void DisplayUi::build_screensaver(lv_obj_t* screen)
         date_row, "---", 0, 0, &montserrat_semibold_20, COLOR_DIM);
     lv_obj_set_style_text_letter_space(screensaver_weekday_, 2, 0);
     lv_obj_t* date_dot = lv_obj_create(date_row);
+    screensaver_date_dot_ = date_dot;
     lv_obj_set_size(date_dot, 4, 4);
     lv_obj_set_style_radius(date_dot, 2, 0);
     lv_obj_set_style_bg_color(date_dot, lv_color_hex(COLOR_DIM), 0);
@@ -790,7 +740,7 @@ void DisplayUi::build_screensaver(lv_obj_t* screen)
         date_row, "-- --", 0, 0, &montserrat_semibold_20, COLOR_DIM);
     lv_obj_set_style_text_letter_space(screensaver_month_day_, 2, 0);
 
-    for (int i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < sizeof(screensaver_usage_) / sizeof(screensaver_usage_[0]); ++i) {
         lv_obj_t* row = lv_obj_create(screensaver_content_);
         lv_obj_set_pos(
             row, SAVER_USAGE_X,
@@ -877,144 +827,146 @@ void DisplayUi::build_screensaver(lv_obj_t* screen)
     lv_obj_set_style_border_width(low_terminal, 0, 0);
     lv_obj_set_style_radius(low_terminal, 1, 0);
     lv_obj_set_style_pad_all(low_terminal, 0, 0);
+    apply_clock_theme();
     lv_obj_add_flag(screensaver_panel_, LV_OBJ_FLAG_HIDDEN);
 }
 
-void DisplayUi::build_overview(lv_obj_t* screen)
+void DisplayUi::apply_clock_theme()
 {
-    overview_panel_ = lv_obj_create(screen);
-    lv_obj_set_pos(overview_panel_, 0, CONTENT_Y);
-    lv_obj_set_size(overview_panel_, SCREEN_W, CONTENT_H);
-    lv_obj_set_style_bg_opa(overview_panel_, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(overview_panel_, 0, 0);
-    lv_obj_set_style_pad_all(overview_panel_, 0, 0);
-    lv_obj_remove_flag(overview_panel_, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(overview_panel_, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_event_cb(
-        overview_panel_, gesture_event, LV_EVENT_GESTURE, this);
-
-    const char* names[] = {"CODEX", "CLAUDE"};
-    for (size_t i = 0; i < 2; ++i) {
-        ProviderWidgets& widgets = overview_[i];
-        widgets.panel = lv_obj_create(overview_panel_);
-        lv_obj_set_pos(widgets.panel, MARGIN, i == 0 ? 17 : 195);
-        lv_obj_set_size(widgets.panel, CARD_W, 166);
-        style_panel(widgets.panel);
-        lv_obj_t* title = make_label(
-            widgets.panel, names[i], OVERVIEW_PAD, 14,
-            &lv_font_montserrat_20);
-        lv_obj_set_style_text_letter_space(title, 1, 0);
-        widgets.compact = true;
-        widgets.status = make_label(
-            widgets.panel, "NO DATA", 220, 17,
-            &lv_font_montserrat_14, COLOR_DIM);
-        lv_obj_set_width(widgets.status, 194);
-        lv_obj_set_style_text_align(widgets.status, LV_TEXT_ALIGN_RIGHT, 0);
-        build_compact_metric(
-            widgets.panel, "SHORT", 50, 42, 78,
-            widgets.short_window);
-        build_compact_metric(
-            widgets.panel, "WEEK", 108, 100, 136,
-            widgets.week_window);
+    if (clock_theme_applied_ && clock_theme_ == theme_) return;
+    const bool guofeng = theme_ == DisplayTheme::Guofeng;
+    lv_image_set_src(screensaver_background_,
+        guofeng ? &guofeng_clock_background : &eva_clock_background);
+    lv_obj_set_style_bg_color(screensaver_panel_,
+        lv_color_hex(guofeng ? 0xE5DDCD : COLOR_SAVER_BG), 0);
+    if (guofeng) {
+        lv_obj_add_flag(screensaver_background_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(screensaver_seal_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(screensaver_background_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(screensaver_seal_, LV_OBJ_FLAG_HIDDEN);
     }
+    lv_obj_set_style_opa(screensaver_background_, 210, 0);
+    lv_obj_set_style_text_font(screensaver_time_,
+        guofeng ? &guofeng_clock_font : &eva_clock_font, 0);
+    lv_obj_set_width(screensaver_time_, LV_SIZE_CONTENT);
+    lv_obj_set_pos(screensaver_time_, guofeng ? 90 : 64, guofeng ? 158 : 182);
+    lv_obj_set_style_transform_pivot_x(screensaver_time_, 0, 0);
+    lv_obj_set_style_transform_pivot_y(screensaver_time_, 0, 0);
+    lv_obj_set_y(screensaver_date_row_, guofeng ? 292 : SAVER_DATE_Y);
+    lv_obj_set_style_text_font(screensaver_month_day_,
+        guofeng ? &guofeng_date_font : &montserrat_semibold_20, 0);
+    lv_obj_set_style_text_letter_space(screensaver_month_day_, guofeng ? 0 : 2, 0);
+    if (guofeng) {
+        lv_obj_add_flag(screensaver_weekday_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(screensaver_date_dot_, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_remove_flag(screensaver_weekday_, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(screensaver_date_dot_, LV_OBJ_FLAG_HIDDEN);
+    }
+    const lv_color_t date_color = lv_color_hex(guofeng ? 0x6D7064 : 0xBE9B83);
+    lv_obj_set_style_text_color(screensaver_weekday_, date_color, 0);
+    lv_obj_set_style_text_color(screensaver_month_day_, date_color, 0);
+    lv_obj_set_style_bg_color(screensaver_date_dot_, date_color, 0);
+    lv_obj_set_style_text_color(screensaver_hint_,
+        lv_color_hex(guofeng ? 0x99988A : 0x895C4C), 0);
+    lv_obj_set_y(lv_obj_get_parent(screensaver_usage_[0].track),
+                 guofeng ? 361 : SAVER_USAGE_Y);
+    lv_obj_set_style_bg_color(screensaver_usage_[0].track,
+        lv_color_hex(guofeng ? 0xCBC6B6 : COLOR_SAVER_TRACK), 0);
+    clock_theme_ = theme_;
+    clock_theme_applied_ = true;
 }
 
-void DisplayUi::build_provider_page(lv_obj_t* screen, Provider provider)
+void DisplayUi::build_provider_page(lv_obj_t* screen)
 {
-    const size_t index = provider_index(provider);
-    ProviderWidgets& widgets = provider_pages_[index];
+    auto& widgets = codex_page_;
     widgets.panel = lv_obj_create(screen);
-    lv_obj_set_pos(widgets.panel, 0, CONTENT_Y);
-    lv_obj_set_size(widgets.panel, SCREEN_W, CONTENT_H);
-    lv_obj_set_style_bg_opa(widgets.panel, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(widgets.panel, 0, 0);
-    lv_obj_set_style_pad_all(widgets.panel, 0, 0);
+    lv_obj_remove_style_all(widgets.panel);
+    lv_obj_set_pos(widgets.panel, 0, 0);
+    lv_obj_set_size(widgets.panel, SCREEN_W, SCREEN_H);
     lv_obj_remove_flag(widgets.panel, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_remove_flag(widgets.panel, LV_OBJ_FLAG_GESTURE_BUBBLE);
-    lv_obj_add_event_cb(
-        widgets.panel, gesture_event, LV_EVENT_GESTURE, this);
+    lv_obj_t* background = lv_image_create(widgets.panel);
+    lv_image_set_src(background, &eva_hud_background);
+    lv_obj_remove_flag(background, LV_OBJ_FLAG_CLICKABLE);
 
-    lv_obj_t* title = make_label(
-        widgets.panel, provider == Provider::Codex ? "CODEX" : "CLAUDE",
-        MARGIN, 11, &lv_font_montserrat_26);
-    lv_obj_set_style_text_letter_space(title, 1, 0);
-    widgets.status =
-        make_label(
-            widgets.panel, "NO DATA", 260, 19,
-            &lv_font_montserrat_14, COLOR_DIM);
-    lv_obj_set_width(widgets.status, SCREEN_W - MARGIN - 260);
-    lv_obj_set_style_text_align(widgets.status, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_letter_space(widgets.status, 1, 0);
-    build_large_metric(
-        widgets.panel, "SHORT WINDOW", 49, widgets.short_window);
-    build_large_metric(
-        widgets.panel, "WEEK WINDOW", 217, widgets.week_window);
+    auto& metric = widgets.short_window;
+    metric.primary = true;
+    // Match the source ring scaled by 0.56 around the full-screen point (240, 200).
+    for (int i = 0; i < 28; ++i) {
+        lv_obj_t* segment = lv_arc_create(widgets.panel);
+        lv_obj_remove_style_all(segment);
+        lv_obj_set_pos(segment, 58, 18);
+        lv_obj_set_size(segment, 364, 364);
+        lv_arc_set_rotation(segment, 135);
+        lv_arc_set_bg_angles(segment, i * 270 / 28 + 1, (i + 1) * 270 / 28 - 1);
+        lv_obj_set_style_arc_width(segment, 29, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(segment, false, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(segment, lv_color_hex(0xFF3D34), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(segment, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_remove_flag(segment, LV_OBJ_FLAG_CLICKABLE);
+        metric.segments[i] = segment;
+    }
+    metric.value = make_label(widgets.panel, "--", 131, 158, &hud_digits, 0xFF424C);
+    lv_obj_set_style_transform_scale_y(metric.value, 384, 0);
+    metric.unit = make_label(widgets.panel, "%", 340, 229, &hud_small, 0xFF424C);
+    lv_obj_set_style_transform_scale_x(metric.unit, 384, 0);
+    lv_obj_set_style_transform_scale_y(metric.unit, 384, 0);
+    metric.caption = make_label(widgets.panel, "QUOTA UNAVAILABLE", 155, 278,
+                                &lv_font_montserrat_12, 0xA7A7A7);
+    lv_obj_set_width(metric.caption, 170);
+    lv_obj_set_style_text_align(metric.caption, LV_TEXT_ALIGN_CENTER, 0);
+    metric.reset = make_label(widgets.panel, "--/-- --:--", 217, 395,
+                              &hud_small, 0xFFF7EE);
+    auto& week = widgets.week_window;
+    week.value = make_label(widgets.panel, "1W --%", 158, 293,
+                            &hud_small, 0xFFB9A8);
+    lv_obj_set_style_transform_scale_y(week.value, 320, 0);
+    week.reset = make_label(widgets.panel, "--/-- --:--", 217, 436,
+                            &hud_small, 0xFFF7EE);
+    build_metric_rollers(metric);
+    build_metric_rollers(week);
 }
 
-void DisplayUi::build_navigation(lv_obj_t* screen)
+void DisplayUi::build_guofeng_page(lv_obj_t* screen)
 {
-    lv_obj_t* navigation = lv_obj_create(screen);
-    lv_obj_set_pos(navigation, MARGIN, NAV_Y);
-    lv_obj_set_size(navigation, CARD_W, NAV_H);
-    lv_obj_set_style_bg_opa(navigation, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(navigation, 0, 0);
-    lv_obj_set_style_pad_all(navigation, 0, 0);
-    lv_obj_set_style_pad_column(navigation, NAV_GAP, 0);
-    lv_obj_set_flex_flow(navigation, LV_FLEX_FLOW_ROW);
-    lv_obj_remove_flag(navigation, LV_OBJ_FLAG_SCROLLABLE);
+    auto& widgets = guofeng_page_;
+    widgets.panel = lv_obj_create(screen);
+    lv_obj_remove_style_all(widgets.panel);
+    lv_obj_set_size(widgets.panel, SCREEN_W, SCREEN_H);
+    lv_obj_remove_flag(widgets.panel, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_t* background = lv_image_create(widgets.panel);
+    lv_image_set_src(background, &guofeng_background);
+    lv_obj_remove_flag(background, LV_OBJ_FLAG_CLICKABLE);
 
-    const char* labels[] = {"OVERVIEW", "CODEX", "CLAUDE"};
-    for (size_t i = 0; i < 3; ++i) {
-        tab_bindings_[i] =
-            TabBinding{this, static_cast<uint8_t>(i)};
-        lv_obj_t* tab = lv_button_create(navigation);
-        lv_obj_set_size(tab, 0, NAV_H);
-        lv_obj_set_flex_grow(tab, 1);
-        lv_obj_set_style_radius(tab, 0, 0);
-        lv_obj_set_style_bg_opa(tab, LV_OPA_TRANSP, 0);
-        // Keep the theme's pressed fill off too, so a touch never paints a
-        // block behind the label.
-        lv_obj_set_style_bg_opa(tab, LV_OPA_TRANSP, LV_STATE_PRESSED);
-        lv_obj_set_style_shadow_width(tab, 0, 0);
-        lv_obj_set_style_border_width(tab, 0, 0);
-        lv_obj_set_style_pad_all(tab, 0, 0);
-        // Reserve the shared underline's height plus its label gap as bottom
-        // padding so the label baseline stays a fixed distance above it.
-        lv_obj_set_style_pad_bottom(tab, NAV_LABEL_GAP + NAV_BAR_H, 0);
-        lv_obj_set_flex_flow(tab, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(
-            tab, LV_FLEX_ALIGN_END,
-            LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_remove_flag(tab, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_add_event_cb(
-            tab, tab_event, LV_EVENT_CLICKED, &tab_bindings_[i]);
-
-        nav_labels_[i] =
-            make_label(
-                tab, labels[i], 0, 0,
-                &montserrat_semibold_13, COLOR_DIM);
-        lv_obj_set_style_text_letter_space(nav_labels_[i], 1, 0);
-    }
-
-    // Selection is shown by an underline, never by a filled block: the
-    // navigation must not outshine the data above it. One underline is shared
-    // by all three tabs so a page change can slide it instead of blinking it
-    // from one tab to the next. It ignores the row layout and is placed by
-    // hand; only its translation is animated, which keeps the transform out of
-    // the flex pass.
-    nav_indicator_ = lv_obj_create(navigation);
-    lv_obj_add_flag(nav_indicator_, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_set_size(nav_indicator_, NAV_BAR_W, NAV_BAR_H);
-    lv_obj_set_style_radius(nav_indicator_, NAV_BAR_H / 2, 0);
-    lv_obj_set_style_bg_color(nav_indicator_, lv_color_hex(COLOR_RESET), 0);
-    lv_obj_set_style_bg_opa(nav_indicator_, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(nav_indicator_, 0, 0);
-    lv_obj_set_style_pad_all(nav_indicator_, 0, 0);
-    lv_obj_remove_flag(nav_indicator_, LV_OBJ_FLAG_SCROLLABLE);
-
-    // Parked under the first tab; every other page is reached by translating
-    // one whole tab pitch, so Page::Overview needs no transform at all.
-    lv_obj_set_pos(nav_indicator_, NAV_BAR_X, NAV_H - NAV_BAR_H);
+    auto& metric = widgets.short_window;
+    metric.primary = true;
+    metric.guofeng = true;
+    metric.ring = lv_arc_create(widgets.panel);
+    lv_obj_remove_style_all(metric.ring);
+    lv_obj_set_pos(metric.ring, 122, 40);
+    lv_obj_set_size(metric.ring, 268, 268);
+    lv_arc_set_rotation(metric.ring, 270);
+    lv_arc_set_bg_angles(metric.ring, 0, 360);
+    lv_obj_set_style_arc_width(metric.ring, 17, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(metric.ring, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(metric.ring, lv_color_hex(0xF3D18B), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(metric.ring, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_remove_flag(metric.ring, LV_OBJ_FLAG_CLICKABLE);
+    metric.value = make_label(widgets.panel, "--", 164, 139, &guofeng_digits, 0xFFF0C7);
+    metric.unit = make_label(widgets.panel, "%", 339, 176,
+                             &lv_font_montserrat_30, 0xFFF0C7);
+    metric.reset = make_label(widgets.panel, "--/-- --:--", 254, 341,
+                              &lv_font_montserrat_20, 0x171C1C);
+    auto& week = widgets.week_window;
+    week.guofeng = true;
+    week.value = make_label(widgets.panel, "1W --%", 196, 208,
+                            &lv_font_montserrat_14, 0xFFF0C7);
+    week.reset = make_label(widgets.panel, "--/-- --:--", 254, 397,
+                            &lv_font_montserrat_20, 0x171C1C);
+    build_metric_rollers(metric);
+    build_metric_rollers(week);
+    lv_obj_add_flag(widgets.panel, LV_OBJ_FLAG_HIDDEN);
 }
 
 void DisplayUi::build_settings(lv_obj_t* screen)
@@ -1026,35 +978,37 @@ void DisplayUi::build_settings(lv_obj_t* screen)
     lv_obj_set_style_bg_color(settings_panel_, lv_color_hex(COLOR_BG), 0);
     lv_obj_set_style_bg_opa(settings_panel_, LV_OPA_COVER, 0);
     lv_obj_remove_flag(settings_panel_, LV_OBJ_FLAG_SCROLLABLE);
-    auto* title = make_label(settings_panel_, "BRIGHTNESS", MARGIN, 24,
+    auto* title = make_label(settings_panel_, "BRIGHTNESS", MARGIN, 12,
                             &lv_font_montserrat_16, COLOR_MUTED);
     lv_obj_set_style_text_letter_space(title, 1, 0);
-    settings_brightness_ = make_label(settings_panel_, "", MARGIN, 58, &lv_font_montserrat_48);
+    settings_brightness_ = make_label(settings_panel_, "", MARGIN, 38, &lv_font_montserrat_48);
     lv_obj_t* divider = lv_obj_create(settings_panel_);
     lv_obj_remove_style_all(divider);
-    lv_obj_set_pos(divider, MARGIN, 158);
+    lv_obj_set_pos(divider, MARGIN, 119);
     lv_obj_set_size(divider, CARD_W, 1);
     lv_obj_set_style_bg_color(divider, lv_color_hex(COLOR_LINE), 0);
     lv_obj_set_style_bg_opa(divider, LV_OPA_COVER, 0);
-    title = make_label(settings_panel_, "AUTO CLOCK", MARGIN, 180,
+    title = make_label(settings_panel_, "AUTO CLOCK", MARGIN, 216,
                        &lv_font_montserrat_16, COLOR_MUTED);
     lv_obj_set_style_text_letter_space(title, 1, 0);
-    settings_timeout_ = make_label(settings_panel_, "AFTER IDLE / MIN", MARGIN, 207,
+    settings_timeout_ = make_label(settings_panel_, "AFTER IDLE / MIN", MARGIN, 241,
                                    &lv_font_montserrat_14, COLOR_MUTED);
-    settings_hint_ = make_label(settings_panel_, "", MARGIN, 322,
+    settings_hint_ = make_label(settings_panel_, "", MARGIN, 330,
                                &montserrat_semibold_13, COLOR_TEXT);
-    const char* labels[] = {"-", "+", "OFF", "1", "5", "10", "30", "SAVE", "CANCEL"};
+    make_label(settings_panel_, "THEME", MARGIN, 126, &lv_font_montserrat_16, COLOR_MUTED);
+    const char* labels[] = {"-", "+", "OFF", "1", "5", "10", "30", "SAVE", "CANCEL", "EVA", "GUOFENG"};
     const SettingsAction actions[] = {SettingsAction::Dimmer, SettingsAction::Brighter,
         SettingsAction::TimeoutOff, SettingsAction::Timeout1, SettingsAction::Timeout5,
-        SettingsAction::Timeout10, SettingsAction::Timeout30, SettingsAction::Save, SettingsAction::Cancel};
-    const int x[] = {288, 376, 24, 112, 200, 288, 376, 250, MARGIN};
-    const int y[] = {58, 58, 244, 244, 244, 244, 244, 349, 349};
-    for (size_t i = 0; i < 9; ++i) {
+        SettingsAction::Timeout10, SettingsAction::Timeout30, SettingsAction::Save, SettingsAction::Cancel,
+        SettingsAction::ThemeEva, SettingsAction::ThemeGuofeng};
+    const int x[] = {288, 376, 24, 112, 200, 288, 376, 250, MARGIN, MARGIN, 250};
+    const int y[] = {38, 38, 268, 268, 268, 268, 268, 355, 355, 150, 150};
+    for (size_t i = 0; i < 11; ++i) {
         lv_obj_t* button = lv_button_create(settings_panel_);
         settings_buttons_[i] = button;
         lv_obj_remove_style_all(button);
         lv_obj_set_pos(button, x[i], y[i]);
-        lv_obj_set_size(button, i < 7 ? 80 : 206, i < 2 ? 80 : 64);
+        lv_obj_set_size(button, i < 7 ? 80 : 206, i < 2 ? 64 : i < 7 ? 52 : i < 9 ? 58 : 50);
         style_panel(button);
         lv_obj_set_style_text_color(button, lv_color_hex(COLOR_MUTED), 0);
         lv_obj_set_style_text_font(button, i < 2 ? &lv_font_montserrat_30 : &lv_font_montserrat_20, 0);
@@ -1087,6 +1041,9 @@ bool DisplayUi::apply_settings(const DisplaySettings& settings, bool visible, bo
             return false;
         brightness_percent_ = settings.brightness;
     }
+    theme_ = settings.theme;
+    lv_obj_set_state(settings_buttons_[9], LV_STATE_CHECKED, theme_ == DisplayTheme::Eva);
+    lv_obj_set_state(settings_buttons_[10], LV_STATE_CHECKED, theme_ == DisplayTheme::Guofeng);
     const bool was_visible = settings_visible_.exchange(visible, std::memory_order_relaxed);
     lv_label_set_text_fmt(settings_brightness_, "%u%%", settings.brightness);
     lv_obj_set_state(settings_buttons_[0], LV_STATE_DISABLED, settings.brightness <= 1);
@@ -1319,100 +1276,251 @@ void DisplayUi::build_ota_overlay(lv_obj_t* screen)
     lv_obj_add_flag(ota_panel_, LV_OBJ_FLAG_HIDDEN);
 }
 
-void DisplayUi::show_page(Page page, bool animate)
+void DisplayUi::update_metric(
+    MetricWidgets& widgets, const UsageWindow& window,
+    bool has_data, uint32_t, bool fresh)
 {
-    lv_obj_add_flag(overview_panel_, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(provider_pages_[0].panel, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(provider_pages_[1].panel, LV_OBJ_FLAG_HIDDEN);
-    if (page == Page::Overview) {
-        lv_obj_remove_flag(overview_panel_, LV_OBJ_FLAG_HIDDEN);
-    } else {
-        const Provider provider =
-            page == Page::Codex ? Provider::Codex : Provider::Claude;
-        lv_obj_remove_flag(
-            provider_pages_[provider_index(provider)].panel,
-            LV_OBJ_FLAG_HIDDEN);
+    const bool available = has_data && window.present;
+    const unsigned percent = available ? 100 - window.used_percent : 0;
+    const uint32_t color = fresh && available
+        ? (widgets.guofeng ? 0xFFF0C7 : quota_color_hex(percent)) : COLOR_DIM;
+    if (widgets.unit != nullptr) {
+        if (available) lv_obj_remove_flag(widgets.unit, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(widgets.unit, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_style_text_color(widgets.unit, lv_color_hex(color), 0);
     }
-
-    const size_t selected = static_cast<size_t>(page);
-    for (size_t i = 0; i < 3; ++i) {
-        lv_obj_set_style_text_color(
-            nav_labels_[i],
-            lv_color_hex(i == selected ? COLOR_RESET : COLOR_DIM), 0);
+    if (widgets.caption != nullptr) {
+        lv_label_set_text(widgets.caption, available ? "QUOTA LEFT" : "QUOTA UNAVAILABLE");
     }
-
-    // render() calls this on every refresh, so the underline only moves when
-    // the page actually changed; otherwise a steady screen would restart the
-    // slide once per second.
-    if (page != shown_page_) {
-        const int32_t target =
-            static_cast<int32_t>(selected) * NAV_TAB_PITCH;
-        lv_anim_delete(nav_indicator_, nav_indicator_slide);
-        if (animate) {
-            lv_anim_t slide;
-            lv_anim_init(&slide);
-            lv_anim_set_var(&slide, nav_indicator_);
-            lv_anim_set_exec_cb(&slide, nav_indicator_slide);
-            lv_anim_set_values(
-                &slide,
-                lv_obj_get_style_translate_x(nav_indicator_, LV_PART_MAIN),
-                target);
-            lv_anim_set_duration(&slide, UI_ANIM_MS);
-            lv_anim_set_path_cb(&slide, lv_anim_path_ease_out);
-            lv_anim_start(&slide);
+    widgets.available = available;
+    widgets.fresh = fresh;
+    const int32_t target = static_cast<int32_t>(percent * 10);
+    if (widgets.target != target) {
+        widgets.animation_from = widgets.displayed;
+        if (widgets.target >= 0) widgets.animation_duration = 600;
+        widgets.target = target;
+        widgets.animation_started = lv_tick_get();
+    }
+    if (!available) {
+        widgets.target = -1;
+        widgets.displayed = 0;
+    }
+    paint_metric(widgets, lv_tick_get());
+    if (available && window.has_reset) {
+        // Match the desktop HUD's explicit Asia/Shanghai (UTC+8) reset dates.
+        const time_t reset = static_cast<time_t>(window.reset_at) + 8 * 60 * 60;
+        struct tm calendar{};
+        if (gmtime_r(&reset, &calendar) != nullptr) {
+            lv_label_set_text_fmt(widgets.reset, "%02d/%02d %02d:%02d",
+                calendar.tm_mon + 1, calendar.tm_mday, calendar.tm_hour, calendar.tm_min);
         } else {
-            nav_indicator_slide(nav_indicator_, target);
+            lv_label_set_text(widgets.reset, "--/-- --:--");
         }
-        shown_page_ = page;
+    } else {
+        lv_label_set_text(widgets.reset, "--/-- --:--");
+    }
+    lv_obj_set_style_text_color(widgets.reset,
+        lv_color_hex(widgets.guofeng ? (fresh ? 0x171C1C : 0x69736B)
+                                   : (fresh ? 0xFFF7EE : COLOR_DIM)), 0);
+    lv_obj_update_layout(widgets.reset);
+    const int date_width = lv_obj_get_width(widgets.reset);
+    if (date_width > 0) lv_obj_set_style_transform_scale_x(widgets.reset, (widgets.guofeng ? 154 : 145) * 256 / date_width, 0);
+}
+
+void DisplayUi::build_metric_rollers(MetricWidgets& widgets)
+{
+    const lv_font_t* font = lv_obj_get_style_text_font(widgets.value, LV_PART_MAIN);
+    widgets.digit_height = lv_font_get_line_height(font);
+    for (char digit = '0'; digit <= '9'; ++digit) {
+        const char text[] = {digit, 0};
+        const int width = lv_text_get_width(text, 1, font, 0);
+        if (width > widgets.digit_width) widgets.digit_width = width;
+    }
+    const int width = widgets.digit_width;
+    widgets.rollers = lv_obj_create(lv_obj_get_parent(widgets.value));
+    lv_obj_remove_style_all(widgets.rollers);
+    lv_obj_set_pos(widgets.rollers, lv_obj_get_style_x(widgets.value, LV_PART_MAIN), lv_obj_get_style_y(widgets.value, LV_PART_MAIN));
+    lv_obj_set_size(widgets.rollers, 4 * width + width / 3, widgets.digit_height);
+    lv_obj_remove_flag(widgets.rollers, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(widgets.rollers, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(widgets.rollers, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
+    lv_obj_set_style_transform_scale_y(widgets.rollers,
+        lv_obj_get_style_transform_scale_y(widgets.value, LV_PART_MAIN), 0);
+    for (int i = 0; i < 4; ++i) {
+        auto* clip = lv_obj_create(widgets.rollers);
+        widgets.digit_clips[i] = clip;
+        lv_obj_remove_style_all(clip);
+        lv_obj_set_size(clip, width, widgets.digit_height);
+        lv_obj_remove_flag(clip, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(clip, LV_OBJ_FLAG_CLICKABLE);
+        for (int j = 0; j < 2; ++j) {
+            auto* label = make_label(clip, "0", 0, j * widgets.digit_height, font, COLOR_DIM);
+            widgets.digit_labels[i][j] = label;
+            lv_obj_set_width(label, width);
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+        }
+    }
+    // Punctuation and the weekly prefix stay still while the reels move.
+    widgets.decimal = make_label(widgets.rollers, ".", 3 * width, 0, font, COLOR_DIM);
+    if (!widgets.primary) {
+        widgets.prefix = make_label(widgets.rollers, "1W", 0, 0, font, COLOR_DIM);
+        widgets.suffix = make_label(widgets.rollers, "%", 0, 0, font, COLOR_DIM);
+    }
+    lv_obj_add_flag(widgets.rollers, LV_OBJ_FLAG_HIDDEN);
+}
+
+void DisplayUi::paint_metric_rollers(MetricWidgets& widgets, int32_t progress, uint32_t color)
+{
+    if (!widgets.available) {
+        lv_obj_add_flag(widgets.rollers, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(widgets.value, LV_OBJ_FLAG_HIDDEN);
+        lv_label_set_text(widgets.value, widgets.primary ? "--" : "1W --%");
+        return;
+    }
+    lv_obj_add_flag(widgets.value, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(widgets.rollers, LV_OBJ_FLAG_HIDDEN);
+    const int width = widgets.digit_width;
+    const int from_leading = widgets.animation_from >= 1000 ? 0 : widgets.animation_from >= 100 ? 1 : 2;
+    const int target_leading = widgets.target >= 1000 ? 0 : widgets.target >= 100 ? 1 : 2;
+    const int leading_progress = progress < 128 ? progress * 8 : 1024;
+    const int skip = width * from_leading +
+        width * (target_leading - from_leading) * leading_progress / 1024;
+    const int natural_width = 4 * width + width / 3 - skip;
+    const int target_width = widgets.guofeng ? (widgets.primary ? 172 : 120)
+                                            : (widgets.primary ? 207 : 165);
+    // The weekly prefix has two fixed cells; retain its original total width.
+    const int prefix_width = widgets.primary ? 0 : 2 * width;
+    const int suffix_width = widgets.primary ? 0 : width;
+    lv_obj_set_x(widgets.rollers, lv_obj_get_style_x(widgets.value, LV_PART_MAIN));
+    lv_obj_set_style_transform_scale_x(widgets.rollers,
+        target_width * 256 / (natural_width + prefix_width + suffix_width), 0);
+    const int places[] = {1000, 100, 10, 1};
+    for (int i = 0; i < 4; ++i) {
+        auto* clip = widgets.digit_clips[i];
+        if ((i < from_leading && i < target_leading) ||
+            (leading_progress == 1024 && i < target_leading)) {
+            lv_obj_add_flag(clip, LV_OBJ_FLAG_HIDDEN);
+            continue;
+        }
+        lv_obj_remove_flag(clip, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_x(clip, i * width + (i == 3 ? width / 3 : 0) - skip + prefix_width);
+        const auto frame = reel_frame(widgets.animation_from, widgets.target, places[i],
+            i < target_leading ? leading_progress : progress,
+            widgets.animation_duration == 2000 && i >= 2);
+        const int offset = frame.phase * widgets.digit_height / 1024;
+        auto* old_label = widgets.digit_labels[i][0];
+        auto* new_label = widgets.digit_labels[i][1];
+        const char old_text[] = {i < target_leading && frame.digit == 0 ? '\0' : static_cast<char>('0' + frame.digit), '\0'};
+        const char next_text[] = {i < target_leading && frame.next == 0 ? '\0' : static_cast<char>('0' + frame.next), '\0'};
+        if (widgets.reel_digits[i] != frame.digit || lv_label_get_text(new_label)[0] != next_text[0]) {
+            lv_label_set_text(old_label, old_text);
+            lv_label_set_text(new_label, next_text);
+            widgets.reel_digits[i] = frame.digit;
+        }
+        lv_obj_set_y(old_label, frame.direction * offset);
+        lv_obj_set_y(new_label, frame.direction * (offset - widgets.digit_height));
+        lv_obj_set_style_text_color(old_label, lv_color_hex(color), 0);
+        lv_obj_set_style_text_color(new_label, lv_color_hex(color), 0);
+    }
+    lv_obj_set_x(widgets.decimal, 3 * width - skip + prefix_width);
+    lv_obj_set_style_text_color(widgets.decimal, lv_color_hex(color), 0);
+    if (widgets.prefix != nullptr) {
+        lv_obj_set_style_text_color(widgets.prefix, lv_color_hex(color), 0);
+        lv_obj_set_x(widgets.suffix, natural_width + prefix_width);
+        lv_obj_set_style_text_color(widgets.suffix, lv_color_hex(color), 0);
     }
 }
 
-void DisplayUi::update_metric(
-    MetricWidgets& widgets, const UsageWindow& window,
-    bool has_data, uint32_t epoch, bool fresh)
+void DisplayUi::paint_metric(MetricWidgets& widgets, uint32_t tick)
 {
-    if (!has_data || !window.present) {
-        lv_label_set_text(widgets.value, "--");
-        lv_obj_set_style_text_color(
-            widgets.value, lv_color_hex(COLOR_DIM), 0);
-        if (widgets.reset != nullptr) {
-            lv_label_set_text(widgets.reset, "");
-        }
-        set_usage_bar_value_immediately(widgets.bar, 0);
-        lv_obj_set_style_bg_color(
-            widgets.bar, lv_color_hex(COLOR_DIM), LV_PART_INDICATOR);
+    int32_t eased = 1024;
+    if (widgets.available) {
+        const uint32_t elapsed = tick - widgets.animation_started;
+        const int32_t t = elapsed >= widgets.animation_duration ? 1024
+            : static_cast<int32_t>(elapsed * 1024 / widgets.animation_duration);
+        eased = t * (2048 - t) / 1024;
+        widgets.displayed = widgets.animation_from +
+            (widgets.target - widgets.animation_from) * eased / 1024;
+    }
+    // Quantize the idle breath, so a 16 ms animation tick need not repaint it.
+    const unsigned phase = tick % 4800;
+    const unsigned wave = phase < 2400 ? phase : 4800 - phase;
+    const int breath = widgets.fresh ? 231 + static_cast<int>(wave / 200) * 2 : 255;
+    const int32_t value = widgets.available ? widgets.displayed : -1;
+    if (value == widgets.painted_value && breath == widgets.painted_breath &&
+        widgets.fresh == widgets.painted_fresh && eased == widgets.painted_progress) return;
+    widgets.painted_progress = eased;
+    widgets.painted_value = value;
+    widgets.painted_breath = breath;
+    widgets.painted_fresh = widgets.fresh;
+    const unsigned percent = static_cast<unsigned>(widgets.displayed / 10);
+    const uint32_t color = widgets.fresh && widgets.available
+        ? (widgets.guofeng ? 0xFFF0C7 : quota_color_hex(percent)) : COLOR_DIM;
+    lv_obj_set_style_text_color(widgets.value, lv_color_hex(color), 0);
+    paint_metric_rollers(widgets, eased, color);
+    if (widgets.ring != nullptr) {
+        const unsigned angle = static_cast<unsigned>(widgets.displayed) * 360 / 1000;
+        lv_arc_set_bg_angles(widgets.ring, 360 - angle, 360);
+        lv_obj_set_style_arc_color(widgets.ring,
+            lv_color_hex(widgets.fresh ? (percent < 10 ? 0xDCA365 : 0xF3D18B) : COLOR_DIM), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(widgets.ring,
+            widgets.available && widgets.displayed > 0 ? breath : 0, LV_PART_MAIN);
+    }
+    for (size_t i = 0; i < 28; ++i) {
+        if (widgets.segments[i] == nullptr) continue;
+        const int coverage = widgets.displayed * 28 - static_cast<int>(i * 1000);
+        const int opacity = !widgets.available || coverage <= 0 ? 0
+            : coverage >= 1000 ? breath : coverage * breath / 1000;
+        lv_obj_set_style_arc_color(widgets.segments[i], lv_color_hex(color), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(widgets.segments[i], opacity, LV_PART_MAIN);
+    }
+}
+
+void DisplayUi::animate_hud(lv_timer_t* timer)
+{
+    auto* ui = static_cast<DisplayUi*>(lv_timer_get_user_data(timer));
+    auto& page = ui->theme_ == DisplayTheme::Guofeng ? ui->guofeng_page_ : ui->codex_page_;
+    const uint32_t tick = lv_tick_get();
+    paint_metric(page.short_window, tick);
+    paint_metric(page.week_window, tick);
+}
+
+void DisplayUi::set_hud_motion(bool visible, bool replay)
+{
+    if (hud_timer_ == nullptr) {
+        hud_timer_ = lv_timer_create(animate_hud, 16, this);
+    }
+    if (hud_timer_ == nullptr) return;
+    if (!visible) {
+        lv_timer_pause(hud_timer_);
         return;
     }
-
-    lv_label_set_text_fmt(widgets.value, "%u%%", window.used_percent);
-    const lv_color_t color = fresh ? usage_color(window.used_percent)
-                                  : lv_color_hex(COLOR_DIM);
-    lv_obj_set_style_text_color(widgets.value, color, 0);
-    lv_obj_set_style_bg_color(widgets.bar, color, LV_PART_INDICATOR);
-    animate_usage_bar(widgets.bar, window.used_percent);
-    if (widgets.reset != nullptr) {
-        char countdown[16]{};
-        format_countdown(
-            window.has_reset, window.reset_at, epoch,
-            countdown, sizeof(countdown));
-        lv_label_set_text_fmt(widgets.reset, "RESET %s", countdown);
-        lv_obj_set_style_text_color(
-            widgets.reset, lv_color_hex(fresh ? COLOR_RESET : COLOR_DIM), 0);
+    auto& page = theme_ == DisplayTheme::Guofeng ? guofeng_page_ : codex_page_;
+    MetricWidgets* metrics[] = {&page.short_window, &page.week_window};
+    for (auto* metric : metrics) {
+        if (replay) {
+            metric->target = -1;
+            metric->displayed = 1000;
+            metric->animation_duration = 2000;
+        }
     }
+    lv_timer_resume(hud_timer_);
 }
 
 void DisplayUi::update_screensaver_usage(const ScreensaverUsageView& usage)
 {
-    // Both rows share a horizontal position when either label is visible.
-    const bool any_percent =
-        usage.rows[0].show_percent || usage.rows[1].show_percent;
+    // Keep the bar and its optional percentage centred together.
+    const bool any_percent = usage.rows[0].show_percent;
     const int bar_x = any_percent ? SAVER_BAR_ALERT_X : SAVER_BAR_X;
 
-    for (int i = 0; i < 2; ++i) {
+    for (size_t i = 0; i < sizeof(screensaver_usage_) / sizeof(screensaver_usage_[0]); ++i) {
         const ScreensaverUsageRow& row = usage.rows[i];
         const ScreensaverUsageWidgets& widgets = screensaver_usage_[i];
         const lv_color_t color =
-            lv_color_hex(saver_usage_color_hex(row.level));
+            lv_color_hex(theme_ == DisplayTheme::Guofeng
+                ? (row.level == ScreensaverUsageLevel::Bad ? 0xA95443
+                   : row.level == ScreensaverUsageLevel::Warn ? 0x8D7955 : 0x777D6A)
+                : saver_usage_color_hex(row.level));
         lv_obj_set_x(widgets.track, bar_x);
         lv_obj_set_x(widgets.fill, bar_x);
         const int width = row.has_data ? saver_fill_width(row.percent) : 0;
@@ -1440,13 +1548,7 @@ void DisplayUi::update_provider(
     const auto state = model.display_state(provider, connected);
     const auto& snapshot = model.snapshot(provider);
     if (widgets.status != nullptr) {
-        if (state == DisplayState::Online && widgets.compact) {
-            char countdown[16]{};
-            format_countdown(snapshot.short_window.has_reset,
-                snapshot.short_window.reset_at, model.estimated_epoch(provider, now_ms),
-                countdown, sizeof(countdown));
-            lv_label_set_text_fmt(widgets.status, "SHORT RESET %s", countdown);
-        } else if (!widgets.compact && state == DisplayState::Online) {
+        if (state == DisplayState::Online) {
             const uint32_t epoch = model.estimated_epoch(provider, now_ms);
             const uint32_t age = epoch > snapshot.sampled_at
                 ? epoch - snapshot.sampled_at : 0;
@@ -1512,7 +1614,7 @@ void DisplayUi::transition_refresh_ready(lv_event_t* event)
 }
 
 void DisplayUi::render(
-    const UsageModel& model, Page page, bool connected,
+    const UsageModel& model, Page, bool connected,
     bool has_passkey, uint32_t passkey, uint64_t now_ms,
     const OtaSnapshot& ota, uint32_t confirm_seconds,
     bool show_ota_error, const PanelPresentation& presentation,
@@ -1527,8 +1629,17 @@ void DisplayUi::render(
     const bool ota_visible = ota.phase != OtaPhase::Idle || show_ota_error;
     const bool screensaver_visible =
         presentation.screensaver.active && !has_passkey && !ota_visible;
+    const bool show_hud = !ota_visible && !screensaver_visible && !has_passkey &&
+        !settings_visible_.load(std::memory_order_relaxed);
+    lv_obj_add_flag(codex_page_.panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(guofeng_page_.panel, LV_OBJ_FLAG_HIDDEN);
+    if (show_hud) {
+        lv_obj_remove_flag(theme_ == DisplayTheme::Guofeng ? guofeng_page_.panel : codex_page_.panel,
+                           LV_OBJ_FLAG_HIDDEN);
+    }
     const bool was_screensaver_visible =
         !lv_obj_has_flag(screensaver_panel_, LV_OBJ_FLAG_HIDDEN);
+    set_hud_motion(show_hud, show_hud && was_screensaver_visible);
     if (screensaver_visible != was_screensaver_visible) {
         // Cancel an active fade before concealing the next screensaver repaint.
         lv_anim_delete(this, transition_brightness);
@@ -1624,18 +1735,49 @@ void DisplayUi::render(
     }
 
     if (screensaver_visible) {
+        apply_clock_theme();
         lv_label_set_text(screensaver_time_, presentation.clock.time);
-        lv_label_set_text(
-            screensaver_weekday_, presentation.clock.available
+        if (theme_ == DisplayTheme::Guofeng) {
+            // UTF-8 weekday names keep the source portable across Windows code pages.
+            constexpr const char* weekdays[] = {
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe6\x97\xa5",
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe4\xb8\x80",
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe4\xba\x8c",
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe4\xb8\x89",
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe5\x9b\x9b",
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe4\xba\x94",
+                "\xe6\x98\x9f\xe6\x9c\x9f\xe5\x85\xad"};
+            if (presentation.clock.available) {
+                lv_label_set_text_fmt(screensaver_month_day_,
+                    "%04u\xe5\xb9\xb4%02u\xe6\x9c\x88%02u\xe6\x97\xa5 %s",
+                    static_cast<unsigned>(presentation.clock.year),
+                    static_cast<unsigned>(presentation.clock.month),
+                    static_cast<unsigned>(presentation.clock.day),
+                    weekdays[presentation.clock.weekday_index]);
+            } else {
+                lv_label_set_text(screensaver_month_day_, "\xe6\x97\xb6\xe9\x97\xb4\xe6\x9c\xaa\xe5\x90\x8c\xe6\xad\xa5");
+            }
+        } else {
+            lv_label_set_text(screensaver_weekday_, presentation.clock.available
                 ? presentation.clock.weekday : "---");
-        lv_label_set_text(
-            screensaver_month_day_, presentation.clock.available
+            lv_label_set_text(screensaver_month_day_, presentation.clock.available
                 ? presentation.clock.month_day : "-- --");
+        }
         lv_obj_set_style_text_color(
             screensaver_time_,
-            lv_color_hex(presentation.clock.available ? COLOR_MUTED : COLOR_DIM),
+            lv_color_hex(presentation.clock.available
+                ? (theme_ == DisplayTheme::Guofeng ? 0x353E36 : 0xD89D7F)
+                : (theme_ == DisplayTheme::Guofeng ? 0x929487 : COLOR_DIM)),
             0);
-        const ScreensaverUsageView usage = make_screensaver_usage_view(model, connected);
+        lv_obj_update_layout(screensaver_time_);
+        const int time_width = lv_obj_get_width(screensaver_time_);
+        if (time_width > 0) {
+            lv_obj_set_style_transform_scale_x(screensaver_time_,
+                (theme_ == DisplayTheme::Guofeng ? 300 : 352) * 256 / time_width, 0);
+        }
+        ScreensaverUsageView usage{};
+        usage.rows[0] = make_screensaver_usage_row(model, Provider::Codex, connected);
+        usage.offline = !usage.rows[0].has_data;
         update_screensaver_usage(usage);
         lv_label_set_text(
             screensaver_hint_,
@@ -1668,14 +1810,8 @@ void DisplayUi::render(
         return;
     }
     lv_obj_add_flag(screensaver_panel_, LV_OBJ_FLAG_HIDDEN);
-    show_page(page, /*animate=*/true);
-    for (Provider provider : {Provider::Codex, Provider::Claude}) {
-        const size_t index = provider_index(provider);
-        update_provider(
-            overview_[index], model, provider, connected, now_ms);
-        update_provider(
-            provider_pages_[index], model, provider, connected, now_ms);
-    }
+    update_provider(theme_ == DisplayTheme::Guofeng ? guofeng_page_ : codex_page_,
+                    model, Provider::Codex, connected, now_ms);
 
     if (has_passkey) {
         lv_label_set_text(connection_label_, "PAIRING");
@@ -1692,61 +1828,6 @@ void DisplayUi::render(
         lv_color_hex(
             has_passkey ? COLOR_WARN : connected ? COLOR_GOOD : COLOR_MUTED),
         0);
-}
-
-void DisplayUi::tab_event(lv_event_t* event)
-{
-    auto* binding =
-        static_cast<TabBinding*>(lv_event_get_user_data(event));
-    if (binding->ui->settings_visible_.load(std::memory_order_relaxed) ||
-        binding->ui->ota_active_.load(std::memory_order_relaxed) ||
-        !binding->ui->input_enabled_.load(std::memory_order_relaxed)) return;
-    binding->ui->requested_page_.store(
-        page_from_tab(
-            binding->tab_index,
-            binding->ui->requested_page_.load(std::memory_order_relaxed)),
-        std::memory_order_relaxed);
-}
-
-void DisplayUi::gesture_event(lv_event_t* event)
-{
-    auto* ui = static_cast<DisplayUi*>(lv_event_get_user_data(event));
-    if (ui->settings_visible_.load(std::memory_order_relaxed) ||
-        ui->ota_active_.load(std::memory_order_relaxed) ||
-        !ui->input_enabled_.load(std::memory_order_relaxed)) return;
-    lv_indev_t* indev = lv_indev_active();
-    if (indev == nullptr) {
-        return;
-    }
-    const lv_dir_t direction = lv_indev_get_gesture_dir(indev);
-    TouchDirection detected_direction;
-    switch (direction) {
-    case LV_DIR_LEFT:
-        detected_direction = TouchDirection::Left;
-        break;
-    case LV_DIR_RIGHT:
-        detected_direction = TouchDirection::Right;
-        break;
-    case LV_DIR_TOP:
-        detected_direction = TouchDirection::Up;
-        break;
-    case LV_DIR_BOTTOM:
-        detected_direction = TouchDirection::Down;
-        break;
-    default:
-        return;
-    }
-
-    const auto swipe = navigation_swipe(detected_direction);
-    if (!swipe.has_value()) {
-        return;
-    }
-
-    const Page current =
-        ui->requested_page_.load(std::memory_order_relaxed);
-    ui->requested_page_.store(
-        page_after_swipe(current, *swipe), std::memory_order_relaxed);
-    lv_indev_wait_release(indev);
 }
 
 void DisplayUi::touch_down_event(lv_event_t* event)

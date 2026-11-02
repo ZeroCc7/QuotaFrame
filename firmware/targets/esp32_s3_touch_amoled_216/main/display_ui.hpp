@@ -101,13 +101,13 @@ public:
         bool painted_fresh = false;
         lv_obj_t* rollers = nullptr;
         lv_obj_t* decimal = nullptr;
-        lv_obj_t* prefix = nullptr;
-        lv_obj_t* suffix = nullptr;
         lv_obj_t* digit_clips[4]{};
         lv_obj_t* digit_labels[4][2]{};
         int reel_digits[4]{-1, -1, -1, -1};
         int digit_height = 0;
         int digit_width = 0;
+        int roller_layout = -1;
+        uint32_t ring_updated_at = 0;
         int32_t painted_progress = -1;
     };
 

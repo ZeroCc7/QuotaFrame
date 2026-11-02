@@ -1,6 +1,7 @@
 #include "display_ui.hpp"
 
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 
 #include "bsp/esp-bsp.h"
@@ -18,6 +19,8 @@
 #include "usage_ota/presentation.hpp"
 
 extern "C" {
+extern const lv_image_dsc_t eva_roller_digits[2][11];
+extern const lv_image_dsc_t guofeng_roller_digits[2][11];
 LV_FONT_DECLARE(hud_digits);
 LV_FONT_DECLARE(hud_small);
 LV_FONT_DECLARE(guofeng_digits);
@@ -925,7 +928,6 @@ void DisplayUi::build_provider_page(lv_obj_t* screen)
     week.reset = make_label(widgets.panel, "--/-- --:--", 217, 436,
                             &hud_small, 0xFFF7EE);
     build_metric_rollers(metric);
-    build_metric_rollers(week);
 }
 
 void DisplayUi::build_guofeng_page(lv_obj_t* screen)
@@ -965,7 +967,6 @@ void DisplayUi::build_guofeng_page(lv_obj_t* screen)
     week.reset = make_label(widgets.panel, "--/-- --:--", 254, 397,
                             &lv_font_montserrat_20, 0x171C1C);
     build_metric_rollers(metric);
-    build_metric_rollers(week);
     lv_obj_add_flag(widgets.panel, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1329,43 +1330,30 @@ void DisplayUi::update_metric(
 
 void DisplayUi::build_metric_rollers(MetricWidgets& widgets)
 {
-    const lv_font_t* font = lv_obj_get_style_text_font(widgets.value, LV_PART_MAIN);
-    widgets.digit_height = lv_font_get_line_height(font);
-    for (char digit = '0'; digit <= '9'; ++digit) {
-        const char text[] = {digit, 0};
-        const int width = lv_text_get_width(text, 1, font, 0);
-        if (width > widgets.digit_width) widgets.digit_width = width;
-    }
-    const int width = widgets.digit_width;
+    widgets.digit_height = widgets.guofeng ? 69 : 90;
     widgets.rollers = lv_obj_create(lv_obj_get_parent(widgets.value));
     lv_obj_remove_style_all(widgets.rollers);
-    lv_obj_set_pos(widgets.rollers, lv_obj_get_style_x(widgets.value, LV_PART_MAIN), lv_obj_get_style_y(widgets.value, LV_PART_MAIN));
-    lv_obj_set_size(widgets.rollers, 4 * width + width / 3, widgets.digit_height);
+    lv_obj_set_pos(widgets.rollers, lv_obj_get_style_x(widgets.value, LV_PART_MAIN),
+                   lv_obj_get_style_y(widgets.value, LV_PART_MAIN));
+    lv_obj_set_size(widgets.rollers, widgets.guofeng ? 172 : 207, widgets.digit_height);
     lv_obj_remove_flag(widgets.rollers, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(widgets.rollers, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_flag(widgets.rollers, LV_OBJ_FLAG_OVERFLOW_VISIBLE);
-    lv_obj_set_style_transform_scale_y(widgets.rollers,
-        lv_obj_get_style_transform_scale_y(widgets.value, LV_PART_MAIN), 0);
     for (int i = 0; i < 4; ++i) {
         auto* clip = lv_obj_create(widgets.rollers);
         widgets.digit_clips[i] = clip;
         lv_obj_remove_style_all(clip);
-        lv_obj_set_size(clip, width, widgets.digit_height);
         lv_obj_remove_flag(clip, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_remove_flag(clip, LV_OBJ_FLAG_CLICKABLE);
         for (int j = 0; j < 2; ++j) {
-            auto* label = make_label(clip, "0", 0, j * widgets.digit_height, font, COLOR_DIM);
-            widgets.digit_labels[i][j] = label;
-            lv_obj_set_width(label, width);
-            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+            auto* image = lv_image_create(clip);
+            widgets.digit_labels[i][j] = image;
+            lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_set_style_image_recolor_opa(image, LV_OPA_COVER, 0);
         }
     }
-    // Punctuation and the weekly prefix stay still while the reels move.
-    widgets.decimal = make_label(widgets.rollers, ".", 3 * width, 0, font, COLOR_DIM);
-    if (!widgets.primary) {
-        widgets.prefix = make_label(widgets.rollers, "1W", 0, 0, font, COLOR_DIM);
-        widgets.suffix = make_label(widgets.rollers, "%", 0, 0, font, COLOR_DIM);
-    }
+    widgets.decimal = lv_image_create(widgets.rollers);
+    lv_obj_remove_flag(widgets.decimal, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_image_recolor_opa(widgets.decimal, LV_OPA_COVER, 0);
     lv_obj_add_flag(widgets.rollers, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -1374,65 +1362,78 @@ void DisplayUi::paint_metric_rollers(MetricWidgets& widgets, int32_t progress, u
     if (!widgets.available) {
         lv_obj_add_flag(widgets.rollers, LV_OBJ_FLAG_HIDDEN);
         lv_obj_remove_flag(widgets.value, LV_OBJ_FLAG_HIDDEN);
-        lv_label_set_text(widgets.value, widgets.primary ? "--" : "1W --%");
+        lv_label_set_text(widgets.value, "--");
         return;
     }
     lv_obj_add_flag(widgets.value, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(widgets.rollers, LV_OBJ_FLAG_HIDDEN);
-    const int width = widgets.digit_width;
-    const int from_leading = widgets.animation_from >= 1000 ? 0 : widgets.animation_from >= 100 ? 1 : 2;
-    const int target_leading = widgets.target >= 1000 ? 0 : widgets.target >= 100 ? 1 : 2;
+    const bool retiring_hundreds = widgets.animation_from >= 1000 && widgets.target < 1000;
     const int leading_progress = progress < 128 ? progress * 8 : 1024;
-    const int skip = width * from_leading +
-        width * (target_leading - from_leading) * leading_progress / 1024;
-    const int natural_width = 4 * width + width / 3 - skip;
-    const int target_width = widgets.guofeng ? (widgets.primary ? 172 : 120)
-                                            : (widgets.primary ? 207 : 165);
-    // The weekly prefix has two fixed cells; retain its original total width.
-    const int prefix_width = widgets.primary ? 0 : 2 * width;
-    const int suffix_width = widgets.primary ? 0 : width;
-    lv_obj_set_x(widgets.rollers, lv_obj_get_style_x(widgets.value, LV_PART_MAIN));
-    lv_obj_set_style_transform_scale_x(widgets.rollers,
-        target_width * 256 / (natural_width + prefix_width + suffix_width), 0);
-    const int places[] = {1000, 100, 10, 1};
-    for (int i = 0; i < 4; ++i) {
-        auto* clip = widgets.digit_clips[i];
-        if ((i < from_leading && i < target_leading) ||
-            (leading_progress == 1024 && i < target_leading)) {
-            lv_obj_add_flag(clip, LV_OBJ_FLAG_HIDDEN);
-            continue;
+    const int variant = widgets.target >= 1000 || (retiring_hundreds && leading_progress < 1024) ? 1 : 0;
+    const auto* atlas = widgets.guofeng ? guofeng_roller_digits[variant] : eva_roller_digits[variant];
+    const int leading = variant ? 0 : widgets.target >= 100 ? 1 : 2;
+    const int layout = variant * 3 + leading;
+    // Masks are already at screen resolution: no transforms or per-frame layout.
+    if (widgets.roller_layout != layout) {
+        widgets.roller_layout = layout;
+        widgets.digit_width = atlas[0].header.w;
+        const int width = widgets.digit_width;
+        const int dot_width = atlas[10].header.w;
+        const int field_width = widgets.guofeng ? 172 : 207;
+        const int left = (field_width - ((4-leading)*width + dot_width)) / 2;
+        for (int i = 0; i < 4; ++i) {
+            auto* clip = widgets.digit_clips[i];
+            if (i < leading) lv_obj_add_flag(clip, LV_OBJ_FLAG_HIDDEN);
+            else lv_obj_remove_flag(clip, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_set_pos(clip, left + (i-leading)*width + (i == 3 ? dot_width : 0), 0);
+            lv_obj_set_size(clip, width, widgets.digit_height);
+            widgets.reel_digits[i] = -1;
         }
-        lv_obj_remove_flag(clip, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_set_x(clip, i * width + (i == 3 ? width / 3 : 0) - skip + prefix_width);
+        lv_image_set_src(widgets.decimal, &atlas[10]);
+        lv_obj_set_pos(widgets.decimal, left + (3-leading)*width, 0);
+    }
+    const int places[] = {1000, 100, 10, 1};
+    for (int i = leading; i < 4; ++i) {
         const auto frame = reel_frame(widgets.animation_from, widgets.target, places[i],
-            i < target_leading ? leading_progress : progress,
+            i == 0 && retiring_hundreds ? leading_progress : progress,
             widgets.animation_duration == 2000 && i >= 2);
         const int offset = frame.phase * widgets.digit_height / 1024;
-        auto* old_label = widgets.digit_labels[i][0];
-        auto* new_label = widgets.digit_labels[i][1];
-        const char old_text[] = {i < target_leading && frame.digit == 0 ? '\0' : static_cast<char>('0' + frame.digit), '\0'};
-        const char next_text[] = {i < target_leading && frame.next == 0 ? '\0' : static_cast<char>('0' + frame.next), '\0'};
-        if (widgets.reel_digits[i] != frame.digit || lv_label_get_text(new_label)[0] != next_text[0]) {
-            lv_label_set_text(old_label, old_text);
-            lv_label_set_text(new_label, next_text);
+        auto* old_image = widgets.digit_labels[i][0];
+        auto* new_image = widgets.digit_labels[i][1];
+        if (widgets.reel_digits[i] != frame.digit || lv_image_get_src(new_image) != &atlas[frame.next]) {
+            lv_image_set_src(old_image, &atlas[frame.digit]);
+            lv_image_set_src(new_image, &atlas[frame.next]);
             widgets.reel_digits[i] = frame.digit;
         }
-        lv_obj_set_y(old_label, frame.direction * offset);
-        lv_obj_set_y(new_label, frame.direction * (offset - widgets.digit_height));
-        lv_obj_set_style_text_color(old_label, lv_color_hex(color), 0);
-        lv_obj_set_style_text_color(new_label, lv_color_hex(color), 0);
+        lv_obj_set_style_opa(old_image, i == 0 && frame.digit == 0 ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_style_opa(new_image, i == 0 && frame.next == 0 ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+        lv_obj_set_y(old_image, frame.direction * offset);
+        lv_obj_set_y(new_image, frame.direction * (offset-widgets.digit_height));
+        lv_obj_set_style_image_recolor(old_image, lv_color_hex(color), 0);
+        lv_obj_set_style_image_recolor(new_image, lv_color_hex(color), 0);
     }
-    lv_obj_set_x(widgets.decimal, 3 * width - skip + prefix_width);
-    lv_obj_set_style_text_color(widgets.decimal, lv_color_hex(color), 0);
-    if (widgets.prefix != nullptr) {
-        lv_obj_set_style_text_color(widgets.prefix, lv_color_hex(color), 0);
-        lv_obj_set_x(widgets.suffix, natural_width + prefix_width);
-        lv_obj_set_style_text_color(widgets.suffix, lv_color_hex(color), 0);
-    }
+    lv_obj_set_style_image_recolor(widgets.decimal, lv_color_hex(color), 0);
 }
 
 void DisplayUi::paint_metric(MetricWidgets& widgets, uint32_t tick)
 {
+    if (!widgets.primary) {
+        const int value = widgets.available ? widgets.target : -1;
+        if (value == widgets.painted_value && widgets.fresh == widgets.painted_fresh) return;
+        widgets.painted_value = value;
+        widgets.painted_fresh = widgets.fresh;
+        if (widgets.available) lv_label_set_text_fmt(widgets.value, "1W %d.0%%", value / 10);
+        else lv_label_set_text(widgets.value, "1W --%");
+        const unsigned percent = widgets.available ? value / 10 : 0;
+        lv_obj_set_style_text_color(widgets.value, lv_color_hex(widgets.fresh && widgets.available
+            ? (widgets.guofeng ? 0xFFF0C7 : quota_color_hex(percent)) : COLOR_DIM), 0);
+        const char* text = lv_label_get_text(widgets.value);
+        const int width = lv_text_get_width(text, std::strlen(text),
+            lv_obj_get_style_text_font(widgets.value, LV_PART_MAIN), 0);
+        if (width > 0) lv_obj_set_style_transform_scale_x(widgets.value,
+            (widgets.guofeng ? 120 : 165) * 256 / width, 0);
+        return;
+    }
     int32_t eased = 1024;
     if (widgets.available) {
         const uint32_t elapsed = tick - widgets.animation_started;
@@ -1445,7 +1446,8 @@ void DisplayUi::paint_metric(MetricWidgets& widgets, uint32_t tick)
     // Quantize the idle breath, so a 16 ms animation tick need not repaint it.
     const unsigned phase = tick % 4800;
     const unsigned wave = phase < 2400 ? phase : 4800 - phase;
-    const int breath = widgets.fresh ? 231 + static_cast<int>(wave / 200) * 2 : 255;
+    const int breath = widgets.fresh && eased == 1024
+        ? 231 + static_cast<int>(wave / 200) * 2 : 255;
     const int32_t value = widgets.available ? widgets.displayed : -1;
     if (value == widgets.painted_value && breath == widgets.painted_breath &&
         widgets.fresh == widgets.painted_fresh && eased == widgets.painted_progress) return;
@@ -1453,11 +1455,13 @@ void DisplayUi::paint_metric(MetricWidgets& widgets, uint32_t tick)
     widgets.painted_value = value;
     widgets.painted_breath = breath;
     widgets.painted_fresh = widgets.fresh;
-    const unsigned percent = static_cast<unsigned>(widgets.displayed / 10);
+    const unsigned percent = static_cast<unsigned>(widgets.target >= 0 ? widgets.target / 10 : 0);
     const uint32_t color = widgets.fresh && widgets.available
         ? (widgets.guofeng ? 0xFFF0C7 : quota_color_hex(percent)) : COLOR_DIM;
     lv_obj_set_style_text_color(widgets.value, lv_color_hex(color), 0);
     paint_metric_rollers(widgets, eased, color);
+    if (eased < 1024 && tick - widgets.ring_updated_at < 40) return;
+    widgets.ring_updated_at = tick;
     if (widgets.ring != nullptr) {
         const unsigned angle = static_cast<unsigned>(widgets.displayed) * 360 / 1000;
         lv_arc_set_bg_angles(widgets.ring, 360 - angle, 360);
@@ -1482,7 +1486,6 @@ void DisplayUi::animate_hud(lv_timer_t* timer)
     auto& page = ui->theme_ == DisplayTheme::Guofeng ? ui->guofeng_page_ : ui->codex_page_;
     const uint32_t tick = lv_tick_get();
     paint_metric(page.short_window, tick);
-    paint_metric(page.week_window, tick);
 }
 
 void DisplayUi::set_hud_motion(bool visible, bool replay)
@@ -1496,13 +1499,12 @@ void DisplayUi::set_hud_motion(bool visible, bool replay)
         return;
     }
     auto& page = theme_ == DisplayTheme::Guofeng ? guofeng_page_ : codex_page_;
-    MetricWidgets* metrics[] = {&page.short_window, &page.week_window};
-    for (auto* metric : metrics) {
-        if (replay) {
-            metric->target = -1;
-            metric->displayed = 1000;
-            metric->animation_duration = 2000;
-        }
+    if (replay) {
+        auto& metric = page.short_window;
+        metric.target = -1;
+        metric.displayed = 1000;
+        metric.animation_duration = 2000;
+        metric.roller_layout = -1;
     }
     lv_timer_resume(hud_timer_);
 }

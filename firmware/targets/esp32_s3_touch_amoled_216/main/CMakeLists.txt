@@ -3,6 +3,7 @@ idf_component_register(
         "app_main.cpp"
         "display_ui.cpp"
         "hud/resources.c"
+        "hud/rollers/resources.c"
         "hud/hud_digits.c"
         "hud/hud_small.c"
         "hud/guofeng/guofeng_digits.c"
@@ -14,6 +15,7 @@ idf_component_register(
         "orientation.cpp"
         "power_monitor.cpp"
     EMBED_FILES "hud/background.rgb565" "hud/guofeng/guofeng.rgb565"
+        "hud/rollers/digits.a8"
         "hud/clocks/eva_clock.rgb565" "hud/clocks/guofeng_clock.rgb565"
     INCLUDE_DIRS "."
     REQUIRES

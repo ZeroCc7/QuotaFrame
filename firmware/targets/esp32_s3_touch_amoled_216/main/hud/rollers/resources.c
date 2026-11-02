@@ -1,0 +1,58 @@
+#include "lvgl.h"
+extern const uint8_t masks[] asm("_binary_digits_a8_start");
+const lv_image_dsc_t eva_roller_digits[2][11] = {
+    {
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 0},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 5760},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 11520},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 17280},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 23040},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 28800},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 34560},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 40320},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 46080},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 64, .h = 90, .stride = 64}, .data_size = 5760, .data = masks + 51840},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 15, .h = 90, .stride = 15}, .data_size = 1350, .data = masks + 57600},
+    },
+    {
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 58950},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 63270},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 67590},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 71910},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 76230},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 80550},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 84870},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 89190},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 93510},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 48, .h = 90, .stride = 48}, .data_size = 4320, .data = masks + 97830},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 15, .h = 90, .stride = 15}, .data_size = 1350, .data = masks + 102150},
+    },
+};
+const lv_image_dsc_t guofeng_roller_digits[2][11] = {
+    {
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 103500},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 107157},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 110814},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 114471},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 118128},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 121785},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 125442},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 129099},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 132756},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 53, .h = 69, .stride = 53}, .data_size = 3657, .data = masks + 136413},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 13, .h = 69, .stride = 13}, .data_size = 897, .data = masks + 140070},
+    },
+    {
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 140967},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 143727},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 146487},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 149247},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 152007},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 154767},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 157527},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 160287},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 163047},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 40, .h = 69, .stride = 40}, .data_size = 2760, .data = masks + 165807},
+        {.header = {.magic = LV_IMAGE_HEADER_MAGIC, .cf = LV_COLOR_FORMAT_A8, .w = 12, .h = 69, .stride = 12}, .data_size = 828, .data = masks + 168567},
+    },
+};

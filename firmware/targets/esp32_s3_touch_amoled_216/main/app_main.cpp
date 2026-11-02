@@ -3,6 +3,8 @@
 
 #include "bsp/esp-bsp.h"
 #include "display_ui.hpp"
+#include "game_audio.hpp"
+#include "number_bomb.hpp"
 #include "memory_telemetry.hpp"
 #include "performance_probe.hpp"
 #include "usage_panel_state/panel_presentation.hpp"
@@ -21,7 +23,9 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "driver/gpio.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 #include "sdkconfig.h"
 
 using namespace usage_panel;
@@ -37,6 +41,7 @@ constexpr uint64_t POWER_POLL_PERIOD_MS = 1000;
 // The PWR key is only visible as an AXP2101 interrupt latch, so it needs a poll
 // fast enough to feel like a button rather than the power telemetry cadence.
 constexpr uint64_t POWER_KEY_POLL_PERIOD_MS = 80;
+constexpr uint64_t GAME_KEY_DEBOUNCE_MS = 40;
 constexpr uint32_t ORIENTATION_STARTUP_SETTLE_MS = 50;
 constexpr uint32_t ORIENTATION_STARTUP_SAMPLE_MS = 20;
 constexpr uint8_t ORIENTATION_STARTUP_MAX_SAMPLES = 12;
@@ -197,6 +202,11 @@ extern "C" void app_main(void)
 
     log_memory_checkpoint("before_lvgl", false);
     ESP_ERROR_CHECK(ui.begin(initial_rotation) ? ESP_OK : ESP_FAIL);
+    gpio_config_t game_key_config{};
+    game_key_config.pin_bit_mask = 1ULL << GPIO_NUM_18;
+    game_key_config.mode = GPIO_MODE_INPUT;
+    game_key_config.pull_up_en = GPIO_PULLUP_ENABLE;
+    ESP_ERROR_CHECK(gpio_config(&game_key_config));
     log_memory_checkpoint("after_ui", true);
     ESP_ERROR_CHECK(verify_lvgl_allocations_external()
                         ? ESP_OK
@@ -207,6 +217,20 @@ extern "C" void app_main(void)
         CONFIG_WS_USAGE_PANEL_SCREENSAVER_TIMEOUT_SECONDS});
     DisplaySettings settings = saved_settings;
     bool settings_open = false;
+    bool game_center_open = false;
+    NumberBomb game;
+    uint32_t game_revision = 0;
+    nvs_handle_t game_prefs = 0;
+    if (nvs_open("number_bomb", NVS_READONLY, &game_prefs) == ESP_OK) {
+        uint8_t sound = 1;
+        if (nvs_get_u8(game_prefs, "sound", &sound) == ESP_OK) game.sound = sound != 0;
+        nvs_close(game_prefs);
+    }
+    GameAudio game_audio;
+    if (!game_audio.begin()) ESP_LOGW(TAG, "game audio task unavailable");
+    bool game_key_sample = gpio_get_level(GPIO_NUM_18) == 0;
+    bool game_key_stable = game_key_sample;
+    uint64_t game_key_changed_ms = esp_timer_get_time() / 1000;
     ui.apply_settings(settings, false);
 
     ScreenRotation desired_rotation = initial_rotation;
@@ -286,6 +310,59 @@ extern "C" void app_main(void)
         if (retain_ota_failure(ota_view, shown_failure, now_ms)) {
             dirty = true;
         }
+        const bool game_key_down = gpio_get_level(GPIO_NUM_18) == 0;
+        if (game_key_down != game_key_sample) {
+            game_key_sample = game_key_down;
+            game_key_changed_ms = now_ms;
+        } else if (game_key_sample != game_key_stable &&
+                   now_ms - game_key_changed_ms >= GAME_KEY_DEBOUNCE_MS) {
+            game_key_stable = game_key_sample;
+            if (game_key_stable && !ble_link.has_passkey &&
+                ota_view.phase == OtaPhase::Idle && !settings_open) {
+                if (screensaver.view(now_ms).active) {
+                    screensaver.note_touch_down(now_ms);
+                    page = screensaver.restore_page();
+                    status_page.store(page, std::memory_order_relaxed);
+                } else {
+                    game_center_open = !game_center_open;
+                    screensaver.reset(now_ms, page);
+                }
+                dirty = true;
+            }
+        }
+        if (ota_view.phase != OtaPhase::Idle && game_center_open) {
+            game_center_open = false;
+            dirty = true;
+        }
+        BombEvent game_event{};
+        while (ui.take_game_event(game_event)) {
+            if (ble_link.has_passkey || ota_view.phase != OtaPhase::Idle ||
+                !game_center_open) continue;
+            const bool sound_before = game.sound;
+            if (!game.apply(game_event, esp_random())) continue;
+            ++game_revision;
+            if (game_event.action == BombAction::ToggleSound && sound_before != game.sound) {
+                esp_err_t save_error = nvs_open("number_bomb", NVS_READWRITE, &game_prefs);
+                if (save_error == ESP_OK) {
+                    save_error = nvs_set_u8(game_prefs, "sound", game.sound ? 1 : 0);
+                    if (save_error == ESP_OK) save_error = nvs_commit(game_prefs);
+                    nvs_close(game_prefs);
+                }
+                if (save_error != ESP_OK)
+                    ESP_LOGW(TAG, "game sound setting save failed: %s", esp_err_to_name(save_error));
+            }
+            if (game.sound) {
+                if (game_event.action == BombAction::Digit ||
+                    game_event.action == BombAction::DeleteDigit) game_audio.play(GameSound::Input);
+                else if (game_event.action == BombAction::Submit)
+                    game_audio.play(game.phase == BombPhase::Boom ? GameSound::Boom : GameSound::Safe);
+                else if (game_event.action == BombAction::Next &&
+                         (game.phase == BombPhase::RoundResult ||
+                          game.phase == BombPhase::Final)) game_audio.play(GameSound::Result);
+            }
+            screensaver.reset(now_ms, page);
+            dirty = true;
+        }
         const SettingsAction action = ui.take_settings_action();
         const bool settings_blocked = ble_link.has_passkey || ota_view.phase != OtaPhase::Idle;
         if (settings_open && settings_blocked) {
@@ -350,6 +427,7 @@ extern "C" void app_main(void)
                 if (ota_view.phase == OtaPhase::Idle && !ble_link.has_passkey) {
                     if (screensaver.view(now_ms).active) page = screensaver.restore_page();
                     page = Page::Codex;
+                    game_center_open = false;
                     ui.request_page(page);
                     screensaver.reset(now_ms, page);
                     settings = saved_settings;
@@ -358,6 +436,7 @@ extern "C" void app_main(void)
                     status_page.store(page, std::memory_order_relaxed);
                 }
             } else if (event.type == AppEventType::ScreenToggle) {
+                game_center_open = false;
                 settings = saved_settings;
                 settings_open = false;
                 ui.apply_settings(settings, false);
@@ -492,10 +571,11 @@ extern "C" void app_main(void)
             dirty = true;
         }
 
+        if (game_center_open) screensaver.reset(now_ms, page);
         screensaver.set_idle_delay(static_cast<uint64_t>(settings.clock_timeout_seconds) * 1000);
         screensaver.update(
             now_ms, page, ble_link.has_passkey,
-            ota_view.phase != OtaPhase::Idle || show_ota_error || settings_open);
+            ota_view.phase != OtaPhase::Idle || show_ota_error || settings_open || game_center_open);
         const ScreensaverView screensaver_view = screensaver.view(now_ms);
         const PanelPresentation presentation{
             .clock = format_clock_view(
@@ -524,7 +604,7 @@ extern "C" void app_main(void)
                 model, page, connected,
                 ble_link.has_passkey, ble_link.passkey, now_ms,
                 display_ota, confirm_seconds, show_ota_error,
-                presentation, input_enabled);
+                presentation, input_enabled, game_center_open, game, game_revision);
             last_render_key = render_key;
             has_last_render_key = true;
             dirty = false;

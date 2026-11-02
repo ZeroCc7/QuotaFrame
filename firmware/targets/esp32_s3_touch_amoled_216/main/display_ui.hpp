@@ -6,6 +6,9 @@
 #include "esp_lcd_touch.h"
 #include "esp_lcd_panel_io.h"
 #include "lvgl.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/queue.h"
+#include "number_bomb.hpp"
 #include "orientation.hpp"
 #include "usage_panel_state/display_settings.hpp"
 #include "usage_panel_state/page_state.hpp"
@@ -19,10 +22,10 @@ namespace usage_panel::amoled {
 /**
  * Owns the LVGL object tree and the narrow event boundary to the app loop.
  *
- * LVGL callbacks never mutate application/OTA state directly. They publish
- * page requests or one-shot atomic event flags, which app_main consumes and
- * applies on its own loop. The flags carry no associated payload, so relaxed
- * ordering is sufficient for these event latches.
+ * LVGL callbacks never mutate application, game, or OTA state directly. They
+ * publish page requests, one-shot flags, or queued game events for app_main to
+ * consume. The flags carry no payload, so relaxed ordering is sufficient for
+ * those latches.
  */
 class DisplayUi {
 public:
@@ -52,7 +55,10 @@ public:
                 bool has_passkey, uint32_t passkey, uint64_t now_ms,
                 const OtaSnapshot& ota, uint32_t confirm_seconds,
                 bool show_ota_error, const PanelPresentation& presentation,
-                bool input_enabled);
+                bool input_enabled, bool game_center_open, const NumberBomb& game,
+                uint32_t game_revision);
+
+    bool take_game_event(BombEvent& event) { return game_events_ && xQueueReceive(game_events_, &event, 0) == pdTRUE; }
 
     /** Consumes one pending touch-down event. */
     bool take_touch_down()
@@ -134,6 +140,15 @@ private:
     void build_provider_page(lv_obj_t* screen);
     void build_guofeng_page(lv_obj_t* screen);
     void build_screensaver(lv_obj_t* screen);
+    void build_game_center(lv_obj_t* screen);
+    void paint_number_bomb(const NumberBomb& game);
+    static void game_card_event(lv_event_t* event);
+    static void game_sound_event(lv_event_t* event);
+    static void game_action_event(lv_event_t* event);
+    void add_game_button(lv_obj_t* parent, const char* text, int x, int y,
+                         int width, int height, BombAction action, uint8_t value = 0,
+                         uint32_t color = 0x19A64A);
+    static void game_toast_timeout(lv_timer_t* timer);
     void apply_clock_theme();
     void build_pairing_overlay(lv_obj_t* screen);
     void build_ota_overlay(lv_obj_t* screen);
@@ -195,6 +210,17 @@ private:
     DisplayTheme theme_ = DisplayTheme::Eva;
     lv_timer_t* hud_timer_ = nullptr;
     lv_obj_t* screensaver_panel_ = nullptr;
+    lv_obj_t* game_center_panel_ = nullptr;
+    lv_obj_t* game_panel_ = nullptr;
+    lv_obj_t* number_bomb_card_ = nullptr;
+    lv_obj_t* game_center_sound_ = nullptr;
+    QueueHandle_t game_events_ = nullptr;
+    struct GameBinding { DisplayUi* ui; BombEvent event; };
+    GameBinding game_bindings_[48]{};
+    uint8_t game_binding_count_ = 0;
+    uint32_t painted_game_revision_ = UINT32_MAX;
+    lv_obj_t* game_toast_ = nullptr;
+    lv_timer_t* game_toast_timer_ = nullptr;
     lv_obj_t* screensaver_content_ = nullptr;
     lv_obj_t* screensaver_background_ = nullptr;
     lv_obj_t* screensaver_seal_ = nullptr;

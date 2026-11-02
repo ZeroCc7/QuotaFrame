@@ -7,6 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from quotaframe_bridge.sources.base import UsageSource
+from quotaframe_bridge.config import load_config
 
 SUPPORTED_PLATFORMS = ("win32", "darwin")
 
@@ -36,6 +37,13 @@ def create_usage_source(
     """
 
     platform = sys.platform if platform is None else platform
+    if platform in SUPPORTED_PLATFORMS and executable is None:
+        config = load_config(platform=platform)
+        if config.get("usage_source") == "codex_cli":
+            from quotaframe_bridge.sources.codex_cli import CodexCliSource
+
+            path = config.get("codex_cli")
+            return CodexCliSource(Path(path) if isinstance(path, str) and path.strip() else None, timeout=timeout)
     if platform == "win32":
         from quotaframe_bridge.sources.codexbar import WinCodexBarSource
 

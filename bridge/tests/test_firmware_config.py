@@ -115,38 +115,35 @@ class FirmwareConfigurationTests(unittest.TestCase):
         self.assertIn("charge_symbol_", header)
         self.assertIn("LV_OPA_TRANSP", source)
         self.assertIn("screensaver_panel_", header)
-        self.assertIn("montserrat_bold_120", source)
+        self.assertIn("eva_clock_font", source)
+        self.assertIn("guofeng_clock_font", source)
+        self.assertIn("apply_clock_theme();", source)
         self.assertIn("lv_obj_set_size(screensaver_panel_, SCREEN_W, SCREEN_H)", source)
-        for label in ('"OVERVIEW"', '"CODEX"', '"CLAUDE"'):
-            self.assertIn(label, source)
+        self.assertIn("lv_image_set_src(background, &eva_hud_background)", source)
+        self.assertIn('viewBox="0 0 1254 1150"', (main / "hud" / "reference.svg").read_text(encoding="utf-8"))
+        self.assertNotIn('"OVERVIEW"', source)
+        self.assertNotIn('"CLAUDE"', source)
         self.assertIn(
             "enum class Page : uint8_t { Overview, Codex, Claude };",
             page_state,
         )
 
-    def test_waveshare_gesture_and_page_request_ownership_are_explicit(self) -> None:
-        source = (
-            ROOT
-            / "firmware"
-            / "targets"
-            / "esp32_s3_touch_amoled_216"
-            / "main"
-            / "display_ui.cpp"
-        ).read_text()
+    def test_waveshare_single_provider_navigation(self) -> None:
+        main = ROOT / "firmware" / "targets" / "esp32_s3_touch_amoled_216" / "main"
+        source = (main / "display_ui.cpp").read_text()
+        header = (main / "display_ui.hpp").read_text()
+        app = (main / "app_main.cpp").read_text()
 
-        self.assertGreaterEqual(
-            source.count(
-                "lv_obj_remove_flag("
-                "overview_panel_, LV_OBJ_FLAG_GESTURE_BUBBLE)"
-            )
-            + source.count(
-                "lv_obj_remove_flag("
-                "widgets.panel, LV_OBJ_FLAG_GESTURE_BUBBLE)"
-            ),
-            2,
-        )
+        self.assertIn("Page page = Page::Codex;", app)
+        self.assertIn(".enable_screen_page = false", app)
+        self.assertNotIn("page_after_swipe(", app)
+        self.assertNotIn("gesture_event", source)
+        self.assertNotIn("build_navigation", source)
+        self.assertNotIn("Provider::Claude", source)
+        self.assertIn("make_screensaver_usage_row(model, Provider::Codex, connected)", source)
+        self.assertIn("ScreensaverUsageWidgets screensaver_usage_[1]", header)
         render_body = source.split("void DisplayUi::render(", 1)[1].split(
-            "void DisplayUi::tab_event(", 1
+            "void DisplayUi::touch_down_event(", 1
         )[0]
         self.assertNotIn("requested_page_.store(", render_body)
 
@@ -226,6 +223,8 @@ class FirmwareConfigurationTests(unittest.TestCase):
             "CONFIG_LV_USE_CLIB_SPRINTF": "y",
             "CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM": "n",
             "CONFIG_LV_USE_BAR": "y",
+            "CONFIG_LV_USE_ARC": "y",
+            "CONFIG_LV_USE_IMAGE": "y",
             "CONFIG_LV_USE_BUTTON": "y",
             "CONFIG_LV_USE_LABEL": "y",
             "CONFIG_LV_USE_FLEX": "y",
@@ -246,14 +245,12 @@ class FirmwareConfigurationTests(unittest.TestCase):
 
         unused_widgets = (
             "CONFIG_LV_USE_ANIMIMG",
-            "CONFIG_LV_USE_ARC",
             "CONFIG_LV_USE_BUTTONMATRIX",
             "CONFIG_LV_USE_CALENDAR",
             "CONFIG_LV_USE_CANVAS",
             "CONFIG_LV_USE_CHART",
             "CONFIG_LV_USE_CHECKBOX",
             "CONFIG_LV_USE_DROPDOWN",
-            "CONFIG_LV_USE_IMAGE",
             "CONFIG_LV_USE_IMAGEBUTTON",
             "CONFIG_LV_USE_KEYBOARD",
             "CONFIG_LV_USE_LED",

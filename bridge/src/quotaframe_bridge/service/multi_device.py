@@ -390,7 +390,7 @@ class MultiDeviceBridgeService:
         # because a steady-state loop logging every minute is noise in a rotating
         # log that runs for days.
         level = logging.INFO if self._first_collection else logging.DEBUG
-        LOGGER.log(level, "reading usage from CodexBar")
+        LOGGER.log(level, "reading usage from %s", type(self.source).__name__)
         started_at = self.monotonic()
         try:
             collection = await self.source.collect(attempted_at=attempted_at)

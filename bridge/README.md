@@ -128,6 +128,12 @@ quotaframe-bridge --codexbar-cli "C:\path\to\codexbar-cli.exe"
 
 找不到任何候选、找到的程序都不是兼容 CLI、或找到 CLI 但都无法解析用量时，Bridge 分别给出对应的脱敏错误提示；提示不会包含候选程序的 stdout、stderr、原始 JSON、账户信息或凭据。
 
+### Codex 官方 CLI 用量源
+
+仅使用 Codex 时，可以在上述 `config.toml` 顶层设置 `usage_source = 'codex_cli'`，通过已登录的官方 Codex CLI 读取真实额度。默认从 PATH 查找原生可执行文件（Windows 为 `codex.exe`），也可用 `codex_cli` 指定其绝对路径。显式传入 `--codexbar-cli` 时仍优先使用 CodexBar。
+
+此模式只调用 `initialize` 和 `account/rateLimits/read`，不会创建对话；凭据由 Codex CLI 管理。Windows 托盘会将已有系统代理设置传给 CLI，已有代理环境变量优先。默认每次采集完成后间隔 60 秒重新读取，CLI 失败时保留上次有效数据，所以持续不变时应检查 `bridge.log` 中的采集错误。此模式不采集 Claude 用量。
+
 ### 弹窗主题
 
 Windows 弹窗跟随系统设置中的“默认应用模式”（浅色/深色），每次打开弹窗时生效，无需重启 Bridge；已经打开的弹窗保持原配色。macOS 使用原生系统弹窗。

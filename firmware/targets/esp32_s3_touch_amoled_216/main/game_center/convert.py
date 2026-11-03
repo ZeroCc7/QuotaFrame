@@ -21,7 +21,6 @@ SIZES = {
     "safe_burst": (280, 280),
     "boom_burst": (280, 280),
 }
-INDEXED = {"background", "title", "number_bomb", "penalty", "return_hint", "safe_burst", "boom_burst"}
 
 
 def convert() -> None:
@@ -30,22 +29,13 @@ def convert() -> None:
         if image.size != size:
             raise ValueError(f"{name}.png must be {size[0]}x{size[1]}")
 
-        if name in INDEXED:
-            indexed = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
-            palette = indexed.getpalette("RGBA")
-            bgra = bytearray(1024)
-            for index in range(256):
-                red, green, blue, alpha = palette[index * 4:index * 4 + 4]
-                bgra[index * 4:index * 4 + 4] = bytes((blue, green, red, alpha))
-            (ROOT / f"{name}.i8").write_bytes(bgra + indexed.tobytes())
-        else:
-            rgba = image.tobytes()
-            bgra = bytearray(len(rgba))
-            bgra[0::4] = rgba[2::4]
-            bgra[1::4] = rgba[1::4]
-            bgra[2::4] = rgba[0::4]
-            bgra[3::4] = rgba[3::4]
-            (ROOT / f"{name}.argb8888").write_bytes(bgra)
+        indexed = image.quantize(colors=256, method=Image.Quantize.FASTOCTREE)
+        palette = indexed.getpalette("RGBA")
+        bgra = bytearray(1024)
+        for index in range(256):
+            red, green, blue, alpha = palette[index * 4:index * 4 + 4]
+            bgra[index * 4:index * 4 + 4] = bytes((blue, green, red, alpha))
+        (ROOT / f"{name}.i8").write_bytes(bgra + indexed.tobytes())
 
 
 if __name__ == "__main__":

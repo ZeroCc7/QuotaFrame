@@ -1,4 +1,5 @@
 #include "display_ui.hpp"
+#include "game_center/math_ui.h"
 
 #include <cstdio>
 #include <cstring>
@@ -21,6 +22,7 @@
 extern "C" {
 extern const lv_image_dsc_t eva_roller_digits[2][11];
 extern const lv_image_dsc_t guofeng_roller_digits[2][11];
+extern const lv_image_dsc_t math_keys[12];
 LV_FONT_DECLARE(hud_digits);
 LV_FONT_DECLARE(hud_small);
 LV_FONT_DECLARE(guofeng_digits);
@@ -28,6 +30,7 @@ LV_FONT_DECLARE(eva_clock_font);
 LV_FONT_DECLARE(guofeng_clock_font);
 LV_FONT_DECLARE(guofeng_date_font);
 LV_FONT_DECLARE(game_zh_font);
+LV_FONT_DECLARE(game_number_font);
 LV_IMAGE_DECLARE(eva_hud_background);
 LV_IMAGE_DECLARE(guofeng_background);
 LV_IMAGE_DECLARE(eva_clock_background);
@@ -1009,15 +1012,19 @@ void DisplayUi::build_game_center(lv_obj_t* screen)
     }
     lv_obj_remove_flag(add_image(&game_center_return_hint, 40, 397), LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t* sound_button = lv_button_create(game_center_panel_);
-    lv_obj_set_pos(sound_button, 316, 421);
-    lv_obj_set_size(sound_button, 142, 42);
+    lv_obj_set_pos(sound_button, 300, 407);
+    lv_obj_set_size(sound_button, 158, 58);
     lv_obj_set_style_radius(sound_button, 18, 0);
     lv_obj_set_style_bg_color(sound_button, lv_color_hex(0x275986), 0);
+    lv_obj_set_style_border_width(sound_button, 2, 0);
+    lv_obj_set_style_border_color(sound_button, lv_color_hex(0xB9E8FF), 0);
+    lv_obj_set_style_pad_all(sound_button, 0, 0);
     lv_obj_add_event_cb(sound_button, game_sound_event, LV_EVENT_CLICKED, this);
-    game_center_sound_ = make_label(sound_button, "音效开", 0, 5,
+    game_center_sound_ = make_label(sound_button, "音效开", 0, 0,
                                     &game_zh_font, COLOR_TEXT);
-    lv_obj_set_width(game_center_sound_, 142);
+    lv_obj_set_width(game_center_sound_, 158);
     lv_obj_set_style_text_align(game_center_sound_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_center(game_center_sound_);
     game_toast_ = lv_obj_create(game_center_panel_);
     lv_obj_set_pos(game_toast_, 92, 208);
     lv_obj_set_size(game_toast_, 296, 64);
@@ -1079,10 +1086,25 @@ void DisplayUi::add_game_button(lv_obj_t* parent, const char* text, int x, int y
     lv_obj_set_style_border_color(button, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_shadow_width(button, 10, 0);
     lv_obj_set_style_shadow_opa(button, 70, 0);
+    if (action == BombAction::ToggleRole) {
+        lv_obj_remove_style_all(button);
+        lv_obj_set_pos(button, x, y);
+        lv_obj_set_size(button, width, height);
+        lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+    } else {
+        lv_obj_set_style_bg_opa(button, LV_OPA_TRANSP, 0);
+        lv_obj_set_style_border_width(button, 0, 0);
+        lv_obj_set_style_shadow_width(button, 0, 0);
+        lv_obj_set_style_bg_image_src(button,
+            width <= 110 ? (action == BombAction::End ? &math_ui_nav_red : &math_ui_nav_blue) :
+            action == BombAction::ConfirmEnd ? &math_ui_button_red :
+            action == BombAction::Lobby || action == BombAction::CancelEnd ?
+            &math_ui_button_blue : &math_ui_button_green, 0);
+    }
     lv_obj_t* label = lv_label_create(button);
     lv_label_set_text(label, text);
     lv_obj_set_style_text_color(label, lv_color_hex(0xFFFFFF), 0);
-    lv_obj_set_style_text_font(label, height < 35 ? &lv_font_montserrat_16 : &game_zh_font, 0);
+    lv_obj_set_style_text_font(label, &game_zh_font, 0);
     lv_obj_center(label);
     auto& binding = game_bindings_[game_binding_count_++];
     binding = {this, {action, value}};
@@ -1099,17 +1121,19 @@ void DisplayUi::paint_number_bomb(const NumberBomb& game)
     lv_obj_t* shade = lv_obj_create(game_panel_);
     lv_obj_remove_style_all(shade);
     lv_obj_set_size(shade, 480, 480);
-    lv_obj_set_style_bg_color(shade, lv_color_hex(0x091934), 0);
-    lv_obj_set_style_bg_opa(shade, 130, 0);
+    lv_obj_set_style_bg_color(shade, lv_color_hex(game.phase == BombPhase::Boom ? 0xC72C16 : game.phase == BombPhase::Safe ? 0x17834A : game.phase == BombPhase::Final ? 0x522E88 : 0x15529A), 0);
+    lv_obj_set_style_bg_opa(shade, 235, 0);
+    lv_obj_set_style_bg_grad_color(shade, lv_color_hex(0x0B183A), 0);
+    lv_obj_set_style_bg_grad_dir(shade, LV_GRAD_DIR_VER, 0);
     lv_obj_remove_flag(shade, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_t* card = lv_obj_create(game_panel_);
     lv_obj_set_pos(card, 18, 66);
     lv_obj_set_size(card, 444, 394);
     lv_obj_set_style_radius(card, 28, 0);
     lv_obj_set_style_bg_color(card, lv_color_hex(0x102B58), 0);
-    lv_obj_set_style_bg_opa(card, 235, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_color(card, lv_color_hex(0xA8DEFF), 0);
-    lv_obj_set_style_border_width(card, 3, 0);
+    lv_obj_set_style_border_width(card, 0, 0);
     lv_obj_set_style_pad_all(card, 0, 0);
     lv_obj_remove_flag(card, LV_OBJ_FLAG_SCROLLABLE);
     auto label = [this](const char* text, int x, int y, int width,
@@ -1124,117 +1148,204 @@ void DisplayUi::paint_number_bomb(const NumberBomb& game)
         &game_center_father, &game_center_mother, &game_center_brother,
         &game_center_sister, &game_center_grandfather, &game_center_grandmother,
     };
-    const char* names[] = {"爸爸", "妈妈", "哥哥", "妹妹", "爷爷", "奶奶"};
     auto avatar = [&](uint8_t role, int x, int y, int size) {
         if (role >= 6) return;
+        const lv_image_dsc_t* small[] = {
+            &math_avatar_0_36, &math_avatar_1_36, &math_avatar_2_36,
+            &math_avatar_3_36, &math_avatar_4_36, &math_avatar_5_36,
+        };
+        const lv_image_dsc_t* medium[] = {
+            &math_avatar_0_80, &math_avatar_1_80, &math_avatar_2_80,
+            &math_avatar_3_80, &math_avatar_4_80, &math_avatar_5_80,
+        };
+        const auto* source = size < 60 ? small[role] : size < 112 ? medium[role] : avatars[role];
         lv_obj_t* image = lv_image_create(game_panel_);
-        lv_image_set_src(image, avatars[role]);
-        lv_obj_set_pos(image, x, y);
-        lv_image_set_scale(image, size * 256 / 112);
+        lv_image_set_src(image, source);
+        lv_obj_set_pos(image, x + (size - source->header.w) / 2,
+                      y + (size - source->header.h) / 2);
         lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
     };
+    auto art = [&](const lv_image_dsc_t* source, int x, int y) {
+        lv_obj_t* image = lv_image_create(game_panel_);
+        lv_image_set_src(image, source);
+        lv_obj_set_pos(image, x, y);
+        lv_obj_remove_flag(image, LV_OBJ_FLAG_CLICKABLE);
+        return image;
+    };
+    const lv_image_dsc_t* name_tags[] = {
+        &math_ui_name_0, &math_ui_name_1, &math_ui_name_2,
+        &math_ui_name_3, &math_ui_name_4, &math_ui_name_5,
+    };
+    auto name_tag = [&](uint8_t role, int x, int y) {
+        if (role < 6) art(name_tags[role], x, y);
+    };
+    auto tile = [&](int x, int y, int width, int height) {
+        lv_obj_t* item = lv_obj_create(game_panel_);
+        lv_obj_set_pos(item, x, y);
+        lv_obj_set_size(item, width, height);
+        lv_obj_set_style_bg_color(item, lv_color_hex(0xE8EBFF), 0);
+        lv_obj_set_style_radius(item, 18, 0);
+        lv_obj_set_style_border_color(item, lv_color_hex(0x8FB9FF), 0);
+        lv_obj_remove_flag(item, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(item, LV_OBJ_FLAG_SCROLLABLE);
+        return item;
+    };
     char text[64];
-    label("数字炸弹", 0, 15, 480, &game_zh_font, 0xFFDE78);
+    auto player_card_position = [&](uint8_t index) {
+        const int rows = (game.count + 1) / 2;
+        const bool single = (game.count % 2) && index == game.count - 1;
+        return lv_point_t{single ? 134 : 24 + (index % 2) * 220,
+                          105 + (3 - rows) * 46 + (index / 2) * 92};
+    };
+    if (game.phase == BombPhase::Input) label("安全范围", 140, 14, 200);
+    else art(&math_ui_title, 180, 0);
     if (game.phase != BombPhase::Lobby)
-        add_game_button(game_panel_, "大厅", 22, 17, 100, 40,
+        add_game_button(game_panel_, "大厅", 22, 10, 100, 48,
                         BombAction::Lobby, 0, 0x37598B);
     if (game.active && game.phase != BombPhase::EndConfirm)
-        add_game_button(game_panel_, "结束", 372, 17, 86, 40,
+        add_game_button(game_panel_, "结束", 358, 10, 100, 48,
                         BombAction::End, 0, 0xA74655);
 
     if (game.phase == BombPhase::Select) {
-        label("谁来玩？", 24, 80, 432);
-        label("2 - 6", 358, 88, 80, &lv_font_montserrat_14);
+        label("谁来玩？", 24, 67, 432);
+        label("2 - 6", 358, 75, 80, &game_zh_font);
         uint8_t selected_count = 0;
         for (uint8_t role = 0; role < 6; ++role) {
             selected_count += (game.selected_mask >> role) & 1;
-            const int x = 37 + (role % 3) * 142;
-            const int y = 120 + (role / 3) * 130;
-            avatar(role, x + 28, y, 76);
-            label(names[role], x, y + 76, 132);
-            add_game_button(game_panel_, (game.selected_mask & (1U << role)) ? "已选" : "+",
-                            x + 30, y + 103, 72, 26, BombAction::ToggleRole, role,
-                            (game.selected_mask & (1U << role)) ? 0x18AE60 : 0x5D668A);
+            const int x = 27 + (role % 3) * 142;
+            const int y = 100 + (role / 3) * 140;
+            const bool selected = (game.selected_mask & (1U << role)) != 0;
+            add_game_button(game_panel_, "", x, y, 136, 134,
+                            BombAction::ToggleRole, role, selected ? 0x287A64 : 0x263E66);
+            avatar(role, x + 24, y + 4, 88);
+            if (selected) art(&math_ui_check, x + 100, y + 72);
+            name_tag(role, x + 18, y + 96);
         }
-        add_game_button(game_panel_, "开始", 177, 401, 156, 46, BombAction::Start,
+        add_game_button(game_panel_, "开始", 127, 390, 226, 70, BombAction::Start,
                         0, selected_count >= 2 ? 0x19A64A : 0x647593);
     } else if (game.phase == BombPhase::Order) {
         label("本局顺序", 24, 82, 432);
         for (uint8_t i = 0; i < game.count; ++i) {
-            const int x = 44 + (i % 3) * 137;
-            const int y = 135 + (i / 3) * 120;
-            avatar(game.order[i], x + 25, y, 70);
-            snprintf(text, sizeof(text), "%u  %s", i + 1, names[game.order[i]]);
-            label(text, x, y + 75, 120);
+            const auto position = player_card_position(i);
+            const int x = position.x;
+            const int y = position.y;
+            tile(x, y, 212, 88);
+            avatar(game.order[i], x + 6, y + 4, 80);
+            name_tag(game.order[i], x + 96, y + 5);
+            snprintf(text, sizeof(text), "%u", i + 1);
+            label(text, x + 112, y + 45, 68, &game_zh_font, 0xE25C29);
         }
-        add_game_button(game_panel_, "继续", 177, 401, 156, 46, BombAction::Continue);
+        add_game_button(game_panel_, "开始游戏", 127, 390, 226, 70, BombAction::Continue);
     } else if (game.phase == BombPhase::Ready) {
-        label("轮到你了", 24, 91, 432);
-        avatar(game.current_player(), 179, 134, 122);
-        label(names[game.current_player()], 24, 267, 432, &game_zh_font, 0xFFDE78);
+        art(&math_ui_ready_panel, 116, 72);
+        label("轮到你了", 24, 78, 432);
+        avatar(game.current_player(), 184, 125, 112);
+        name_tag(game.current_player(), 190, 244);
         snprintf(text, sizeof(text), "第%u轮   %u - %u", game.round, game.low, game.high);
-        label(text, 24, 316, 432);
-        add_game_button(game_panel_, "准备好了", 177, 401, 156, 46, BombAction::Continue);
+        lv_obj_t* range_box = lv_obj_create(game_panel_);
+        lv_obj_remove_style_all(range_box);
+        lv_obj_set_pos(range_box, 130, 301);
+        lv_obj_set_size(range_box, 220, 48);
+        lv_obj_remove_flag(range_box, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(range_box, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t* range_label = make_label(range_box, text, 0, 0, &game_zh_font);
+        lv_obj_set_width(range_label, 220);
+        lv_obj_set_style_text_align(range_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(range_label);
+
+        add_game_button(game_panel_, "准备好了", 127, 390, 226, 70, BombAction::Continue);
     } else if (game.phase == BombPhase::Input) {
-        snprintf(text, sizeof(text), "%s猜数字", names[game.current_player()]);
-        label(text, 24, 78, 432);
-        snprintf(text, sizeof(text), "%u  -  %u", game.low, game.high);
-        label(text, 24, 109, 432, &lv_font_montserrat_30, 0xFFDE78);
+        snprintf(text, sizeof(text), "%u - %u", game.low, game.high);
+        label(text, 24, 58, 432, &game_number_font, 0xFFDE78);
+        avatar(game.current_player(), 44, 80, 80);
+        lv_obj_t* input_box = tile(155, 108, 270, 52);
+        lv_obj_set_style_pad_all(input_box, 0, 0);
+        if (game.input_digits && !game.valid_guess())
+            lv_obj_set_style_border_color(input_box, lv_color_hex(0xBE2A35), 0);
         if (game.input_digits) snprintf(text, sizeof(text), "%u", game.input);
-        else snprintf(text, sizeof(text), "? ?");
-        label(text, 100, 156, 280, &lv_font_montserrat_48);
-        for (uint8_t digit = 1; digit <= 9; ++digit) {
-            char digit_text[2] = {static_cast<char>('0' + digit), 0};
-            add_game_button(game_panel_, digit_text,
-                            90 + ((digit - 1) % 3) * 104,
-                            220 + ((digit - 1) / 3) * 53,
-                            88, 46, BombAction::Digit, digit, 0x4166A1);
+        else snprintf(text, sizeof(text), "?");
+        lv_obj_t* input_label = make_label(input_box, text, 0, 0, &game_number_font,
+            game.input_digits && !game.valid_guess() ? 0xBE2A35 : 0x15264B);
+        lv_obj_set_width(input_label, 266);
+        lv_obj_set_style_text_align(input_label, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_center(input_label);
+        for (uint8_t index = 0; index < 12; ++index) {
+            lv_obj_t* key = lv_image_create(game_panel_);
+            lv_image_set_src(key, &math_keys[index]);
+            lv_obj_set_pos(key, 62 + (index % 3) * 128, 164 + (index / 3) * 76);
+            lv_obj_add_flag(key, LV_OBJ_FLAG_CLICKABLE);
+            if (index == 11 && !game.valid_guess()) {
+                lv_obj_add_state(key, LV_STATE_DISABLED);
+                lv_obj_set_style_opa(key, 90, 0);
+            }
+            auto& binding = game_bindings_[game_binding_count_++];
+            const BombAction action = index == 10 ? BombAction::DeleteDigit :
+                                      index == 11 ? BombAction::Submit : BombAction::Digit;
+            binding = {this, {action, static_cast<uint8_t>(index < 9 ? index + 1 : 0)}};
+            lv_obj_add_event_cb(key, game_action_event, LV_EVENT_CLICKED, &binding);
         }
-        add_game_button(game_panel_, "删除", 90, 379, 88, 44,
-                        BombAction::DeleteDigit, 0, 0x647593);
-        add_game_button(game_panel_, "0", 194, 379, 88, 44,
-                        BombAction::Digit, 0, 0x4166A1);
-        add_game_button(game_panel_, "确定", 298, 379, 88, 44,
-                        BombAction::Submit, 0, game.valid_guess() ? 0x18AE60 : 0x647593);
     } else if (game.phase == BombPhase::Safe || game.phase == BombPhase::Boom) {
         const bool safe = game.phase == BombPhase::Safe;
-        lv_obj_t* burst = lv_image_create(game_panel_);
-        lv_image_set_src(burst, safe ? &game_center_safe_burst : &game_center_boom_burst);
-        lv_obj_set_pos(burst, 100, 107);
-        lv_obj_remove_flag(burst, LV_OBJ_FLAG_CLICKABLE);
-        label(safe ? "安全!" : "爆炸!", 24, 91, 432,
-              &game_zh_font, safe ? 0x80FFAB : 0xFF967C);
-        avatar(game.last_player, 179, 166, 122);
-        snprintf(text, sizeof(text), "%s猜了%u", names[game.last_player], game.guess);
-        label(text, 24, 294, 432);
-        snprintf(text, sizeof(text), safe ? "范围  %u - %u" : "炸弹  %u / 3",
-                 safe ? game.low : game.scores[game.last_player], safe ? game.high : 3);
-        label(text, 24, 330, 432, &game_zh_font, 0xFFDE78);
-        add_game_button(game_panel_, "下一位", 177, 401, 156, 46, BombAction::Next);
+        art(safe ? &math_ui_safe : &math_ui_boom, safe ? 110 : 80, 76);
+        if (safe) {
+            snprintf(text, sizeof(text), "%u", game.guess);
+            label(text, 24, 180, 432, &game_number_font, 0xFFFFFF);
+            art(&math_ui_range, 158, 250);
+            snprintf(text, sizeof(text), "%u - %u", game.low, game.high);
+            label(text, 24, 310, 432, &game_number_font, 0xFFFFFF);
+        } else {
+            avatar(game.last_player, 184, 188, 112);
+            name_tag(game.last_player, 190, 304);
+            for (uint8_t strike = 0; strike < 3; ++strike)
+                art(strike < game.scores[game.last_player] ? &math_ui_bomb_on : &math_ui_bomb_off,
+                    192 + strike * 32, 343);
+        }
+        add_game_button(game_panel_, "下一位", 127, 390, 226, 70, BombAction::Next);
     } else if (game.phase == BombPhase::RoundResult || game.phase == BombPhase::Final) {
-        label(game.phase == BombPhase::Final ? "最终结果" : "本轮结算",
-              24, 83, 432, &game_zh_font, 0xFFDE78);
+        auto bombs = [&](uint8_t score, int x, int y, bool highlight = false) {
+            for (uint8_t strike = 0; strike < score && strike < 3; ++strike) {
+                lv_obj_t* icon = art(&math_ui_bomb_on, x + strike * 32, y);
+                if (highlight && strike + 1 == score) {
+                    lv_anim_t flash;
+                    lv_anim_init(&flash);
+                    lv_anim_set_var(&flash, icon);
+                    lv_anim_set_values(&flash, 90, 255);
+                    lv_anim_set_duration(&flash, 220);
+                    lv_anim_set_repeat_count(&flash, 2);
+                    lv_anim_set_exec_cb(&flash, [](void* target, int32_t opacity) {
+                        lv_obj_set_style_opa(static_cast<lv_obj_t*>(target), opacity, 0);
+                    });
+                    lv_anim_start(&flash);
+                }
+            }
+        };
         if (game.phase == BombPhase::Final) {
-            avatar(game.loser, 184, 126, 112);
-            snprintf(text, sizeof(text), "%s输了", names[game.loser]);
-            label(text, 24, 244, 432);
+            art(&math_ui_failed, 90, 76);
+            avatar(game.loser, 184, 160, 112);
+            name_tag(game.loser, 190, 278);
+            bombs(3, 192, 330);
+            add_game_button(game_panel_, "再来一局", 127, 390, 226, 70, BombAction::Rematch);
+        } else {
+            label("本轮结算", 24, 73, 432, &game_zh_font, 0xFFDE78);
+            for (uint8_t i = 0; i < game.count; ++i) {
+                const uint8_t role = game.order[i];
+                const auto position = player_card_position(i);
+                const int x = position.x;
+                const int y = position.y;
+                tile(x, y, 212, 88);
+                avatar(role, x + 6, y + 4, 80);
+                name_tag(role, x + 96, y + 4);
+                bombs(game.scores[role], x + 98, y + 46, role == game.last_player);
+                if (role == game.last_player) art(&math_ui_check, x + 180, y + 4);
+            }
+            add_game_button(game_panel_, "下一轮", 127, 390, 226, 70, BombAction::Next);
         }
-        for (uint8_t i = 0; i < game.count; ++i) {
-            const int x = 48 + (i % 2) * 203;
-            const int y = (game.phase == BombPhase::Final ? 284 : 145) +
-                          (i / 2) * (game.phase == BombPhase::Final ? 34 : 61);
-            snprintf(text, sizeof(text), "%s   %u / 3", names[game.order[i]], game.scores[game.order[i]]);
-            label(text, x, y, 180);
-        }
-        add_game_button(game_panel_, game.phase == BombPhase::Final ? "再来一局" : "下一轮",
-                        177, 401, 156, 46,
-                        game.phase == BombPhase::Final ? BombAction::Rematch : BombAction::Next);
     } else if (game.phase == BombPhase::EndConfirm) {
         label("结束本局？", 24, 132, 432);
         label("分数将清除", 24, 205, 432);
-        add_game_button(game_panel_, "取消", 50, 302, 170, 62,
+        add_game_button(game_panel_, "取消", 8, 302, 226, 70,
                         BombAction::CancelEnd, 0, 0x4166A1);
-        add_game_button(game_panel_, "确认结束", 260, 302, 170, 62,
+        add_game_button(game_panel_, "确认结束", 246, 302, 226, 70,
                         BombAction::ConfirmEnd, 0, 0xB34650);
     }
     if (game.phase == BombPhase::Boom) {
